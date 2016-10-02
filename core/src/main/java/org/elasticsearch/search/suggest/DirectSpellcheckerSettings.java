@@ -25,17 +25,31 @@ import org.apache.lucene.util.automaton.LevenshteinAutomata;
 
 public class DirectSpellcheckerSettings  {
 
-    private SuggestMode suggestMode = SuggestMode.SUGGEST_WHEN_NOT_IN_INDEX;
-    private float accuracy = 0.5f;
-    private Suggest.Suggestion.Sort sort = Suggest.Suggestion.Sort.SCORE;
-    private StringDistance stringDistance = DirectSpellChecker.INTERNAL_LEVENSHTEIN;
-    private int maxEdits = LevenshteinAutomata.MAXIMUM_SUPPORTED_DISTANCE;
-    private int maxInspections = 5;
-    private float maxTermFreq = 0.01f;
-    private int prefixLength = 1;
-    private int minWordLength = 4;
-    private float minDocFreq = 0f;
-	private boolean exactMatch = false;
+    // NB: If this changes, make sure to change the default in TermBuilderSuggester
+    public static SuggestMode DEFAULT_SUGGEST_MODE = SuggestMode.SUGGEST_WHEN_NOT_IN_INDEX;
+    public static float DEFAULT_ACCURACY = 0.5f;
+    public static SortBy DEFAULT_SORT = SortBy.SCORE;
+    // NB: If this changes, make sure to change the default in TermBuilderSuggester
+    public static StringDistance DEFAULT_STRING_DISTANCE = DirectSpellChecker.INTERNAL_LEVENSHTEIN;
+    public static int DEFAULT_MAX_EDITS = LevenshteinAutomata.MAXIMUM_SUPPORTED_DISTANCE;
+    public static int DEFAULT_MAX_INSPECTIONS = 5;
+    public static float DEFAULT_MAX_TERM_FREQ = 0.01f;
+    public static int DEFAULT_PREFIX_LENGTH = 1;
+    public static int DEFAULT_MIN_WORD_LENGTH = 4;
+    public static float DEFAULT_MIN_DOC_FREQ = 0f;
+    public static boolean DEFAULT_EXACT_MATCH = false;
+
+    private SuggestMode suggestMode = DEFAULT_SUGGEST_MODE;
+    private float accuracy = DEFAULT_ACCURACY;
+    private SortBy sort = DEFAULT_SORT;
+    private StringDistance stringDistance = DEFAULT_STRING_DISTANCE;
+    private int maxEdits = DEFAULT_MAX_EDITS;
+    private int maxInspections = DEFAULT_MAX_INSPECTIONS;
+    private float maxTermFreq = DEFAULT_MAX_TERM_FREQ;
+    private int prefixLength = DEFAULT_PREFIX_LENGTH;
+    private int minWordLength = DEFAULT_MIN_WORD_LENGTH;
+    private float minDocFreq = DEFAULT_MIN_DOC_FREQ;
+    private boolean exactMatch = DEFAULT_EXACT_MATCH;
 
     public SuggestMode suggestMode() {
         return suggestMode;
@@ -53,11 +67,11 @@ public class DirectSpellcheckerSettings  {
         this.accuracy = accuracy;
     }
 
-    public Suggest.Suggestion.Sort sort() {
+    public SortBy sort() {
         return sort;
     }
 
-    public void sort(Suggest.Suggestion.Sort sort) {
+    public void sort(SortBy sort) {
         this.sort = sort;
     }
 
@@ -105,8 +119,8 @@ public class DirectSpellcheckerSettings  {
         return minWordLength;
     }
 
-    public void minQueryLength(int minQueryLength) {
-        this.minWordLength = minQueryLength;
+    public void minWordLength(int minWordLength) {
+        this.minWordLength = minWordLength;
     }
 
     public float minDocFreq() {
@@ -122,6 +136,23 @@ public class DirectSpellcheckerSettings  {
  
     public void exactMatch(boolean exactMatch) {
        this.exactMatch = exactMatch;
+    }
+
+    @Override
+    public String toString() {
+        return "[" +
+                   "suggestMode=" + suggestMode +
+                   ",sort=" + sort +
+                   ",stringDistance=" + stringDistance +
+                   ",accuracy=" + accuracy +
+                   ",maxEdits=" + maxEdits +
+                   ",maxInspections=" + maxInspections +
+                   ",maxTermFreq=" + maxTermFreq +
+                   ",prefixLength=" + prefixLength +
+                   ",minWordLength=" + minWordLength +
+                   ",minDocFreq=" + minDocFreq +
+                   ",exactMatch=" + exactMatch +
+               "]";
     }
 
 }

@@ -18,6 +18,14 @@
  */
 package org.elasticsearch.messy.tests;
 
+import java.io.IOException;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+
 import org.elasticsearch.action.index.IndexRequest.OpType;
 import org.elasticsearch.action.index.IndexRequestBuilder;
 import org.elasticsearch.action.indexedscripts.delete.DeleteIndexedScriptResponse;
@@ -31,9 +39,9 @@ import org.elasticsearch.common.ParseFieldMatcher;
 import org.elasticsearch.common.settings.Settings;
 import org.elasticsearch.common.xcontent.XContentFactory;
 import org.elasticsearch.common.xcontent.XContentParser;
+import org.elasticsearch.env.Environment;
 import org.elasticsearch.index.query.QueryBuilders;
 import org.elasticsearch.index.query.TemplateQueryBuilder;
-import org.elasticsearch.index.query.TemplateQueryParser;
 import org.elasticsearch.plugins.Plugin;
 import org.elasticsearch.script.ScriptService;
 import org.elasticsearch.script.ScriptService.ScriptType;
@@ -44,15 +52,6 @@ import org.elasticsearch.search.builder.SearchSourceBuilder;
 import org.elasticsearch.test.ESIntegTestCase;
 import org.junit.Before;
 
-import java.io.IOException;
-import java.util.ArrayList;
-import java.util.Collection;
-import java.util.Collections;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-
-import static org.elasticsearch.common.settings.Settings.settingsBuilder;
 import static org.elasticsearch.common.xcontent.XContentFactory.jsonBuilder;
 import static org.elasticsearch.test.hamcrest.ElasticsearchAssertions.assertFailures;
 import static org.elasticsearch.test.hamcrest.ElasticsearchAssertions.assertHitCount;
@@ -84,8 +83,8 @@ public class TemplateQueryTests extends ESIntegTestCase {
 
     @Override
     public Settings nodeSettings(int nodeOrdinal) {
-        return settingsBuilder().put(super.nodeSettings(nodeOrdinal))
-                .put("path.conf", this.getDataPath("config")).build();
+        return Settings.builder().put(super.nodeSettings(nodeOrdinal))
+                .put(Environment.PATH_CONF_SETTING.getKey(), this.getDataPath("config")).build();
     }
 
     public void testTemplateInBody() throws IOException {
@@ -154,7 +153,7 @@ public class TemplateQueryTests extends ESIntegTestCase {
 
     private Template parseTemplate(String template) throws IOException {
         try (XContentParser parser = XContentFactory.xContent(template).createParser(template)) {
-            return TemplateQueryParser.parse(parser, ParseFieldMatcher.EMPTY, "params", "template");
+            return TemplateQueryBuilder.parse(parser, ParseFieldMatcher.EMPTY, "params", "template");
         }
     }
 

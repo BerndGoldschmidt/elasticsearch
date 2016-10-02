@@ -19,7 +19,6 @@
 
 package org.elasticsearch.action.indexedscripts.put;
 
-import java.nio.charset.StandardCharsets;
 import org.elasticsearch.ElasticsearchGenerationException;
 import org.elasticsearch.action.ActionRequest;
 import org.elasticsearch.action.ActionRequestValidationException;
@@ -40,6 +39,7 @@ import org.elasticsearch.index.VersionType;
 import org.elasticsearch.script.ScriptService;
 
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.util.Map;
 
 import static org.elasticsearch.action.ValidateActions.addValidationError;
@@ -164,7 +164,7 @@ public class PutIndexedScriptRequest extends ActionRequest<PutIndexedScriptReque
     }
 
     /**
-     * The source of the document to index, recopied to a new array if it is unsage.
+     * The source of the document to index, recopied to a new array if it is unsafe.
      */
     public BytesReference source() {
         return source;

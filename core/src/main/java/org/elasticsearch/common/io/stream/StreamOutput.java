@@ -33,34 +33,45 @@ import org.elasticsearch.common.Nullable;
 import org.elasticsearch.common.bytes.BytesReference;
 import org.elasticsearch.common.geo.GeoPoint;
 import org.elasticsearch.common.text.Text;
-import org.elasticsearch.index.query.QueryBuilder;
-import org.elasticsearch.index.query.functionscore.ScoreFunctionBuilder;
+import org.joda.time.DateTimeZone;
 import org.joda.time.ReadableInstant;
 
 import java.io.EOFException;
 import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.io.OutputStream;
+import java.nio.file.AccessDeniedException;
+import java.nio.file.AtomicMoveNotSupportedException;
+import java.nio.file.DirectoryNotEmptyException;
+import java.nio.file.FileAlreadyExistsException;
+import java.nio.file.FileSystemException;
+import java.nio.file.FileSystemLoopException;
 import java.nio.file.NoSuchFileException;
+import java.nio.file.NotDirectoryException;
 import java.util.Date;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
 /**
- *
+ * A stream from another node to this node. Technically, it can also be streamed from a byte array but that is mostly for testing.
  */
 public abstract class StreamOutput extends OutputStream {
 
     private Version version = Version.CURRENT;
 
+    /**
+     * The version of the node on the other side of this stream.
+     */
     public Version getVersion() {
         return this.version;
     }
 
-    public StreamOutput setVersion(Version version) {
+    /**
+     * Set the version of the node on the other side of this stream.
+     */
+    public void setVersion(Version version) {
         this.version = version;
-        return this;
     }
 
     public long position() throws IOException {
@@ -123,6 +134,19 @@ public abstract class StreamOutput extends OutputStream {
             return;
         }
         writeVInt(bytes.length());
+        bytes.writeTo(this);
+    }
+
+    /**
+     * Writes an optional bytes reference including a length header. Use this if you need to differentiate between null and empty bytes
+     * references. Use {@link #writeBytesReference(BytesReference)} and {@link StreamInput#readBytesReference()} if you do not.
+     */
+    public void writeOptionalBytesReference(@Nullable BytesReference bytes) throws IOException {
+        if (bytes == null) {
+            writeVInt(0);
+            return;
+        }
+        writeVInt(bytes.length() + 1);
         bytes.writeTo(this);
     }
 
@@ -221,6 +245,15 @@ public abstract class StreamOutput extends OutputStream {
         }
     }
 
+    public void writeOptionalFloat(@Nullable Float floatValue) throws IOException {
+        if (floatValue == null) {
+            writeBoolean(false);
+        } else {
+            writeBoolean(true);
+            writeFloat(floatValue);
+        }
+    }
+
     public void writeOptionalText(@Nullable Text text) throws IOException {
         if (text == null) {
             writeInt(-1);
@@ -271,6 +304,14 @@ public abstract class StreamOutput extends OutputStream {
         writeLong(Double.doubleToLongBits(v));
     }
 
+    public void writeOptionalDouble(Double v) throws IOException {
+        if (v == null) {
+            writeBoolean(false);
+        } else {
+            writeBoolean(true);
+            writeDouble(v);
+        }
+    }
 
     private static byte ZERO = 0;
     private static byte ONE = 1;
@@ -503,6 +544,15 @@ public abstract class StreamOutput extends OutputStream {
         }
     }
 
+    public void writeOptionalWriteable(@Nullable Writeable<?> writeable) throws IOException {
+        if (writeable != null) {
+            writeBoolean(true);
+            writeable.writeTo(this);
+        } else {
+            writeBoolean(false);
+        }
+    }
+
     public void writeThrowable(Throwable throwable) throws IOException {
         if (throwable == null) {
             writeBoolean(false);
@@ -564,11 +614,28 @@ public abstract class StreamOutput extends OutputStream {
             } else if (throwable instanceof FileNotFoundException) {
                 writeVInt(13);
                 writeCause = false;
-            } else if (throwable instanceof NoSuchFileException) {
+            } else if (throwable instanceof FileSystemException) {
                 writeVInt(14);
-                writeOptionalString(((NoSuchFileException) throwable).getFile());
-                writeOptionalString(((NoSuchFileException) throwable).getOtherFile());
-                writeOptionalString(((NoSuchFileException) throwable).getReason());
+                if (throwable instanceof NoSuchFileException) {
+                    writeVInt(0);
+                } else if (throwable instanceof NotDirectoryException) {
+                    writeVInt(1);
+                } else if (throwable instanceof DirectoryNotEmptyException) {
+                    writeVInt(2);
+                } else if (throwable instanceof AtomicMoveNotSupportedException) {
+                    writeVInt(3);
+                } else if (throwable instanceof FileAlreadyExistsException) {
+                    writeVInt(4);
+                } else if (throwable instanceof AccessDeniedException) {
+                    writeVInt(5);
+                } else if (throwable instanceof FileSystemLoopException) {
+                    writeVInt(6);
+                } else {
+                    writeVInt(7);
+                }
+                writeOptionalString(((FileSystemException) throwable).getFile());
+                writeOptionalString(((FileSystemException) throwable).getOtherFile());
+                writeOptionalString(((FileSystemException) throwable).getReason());
                 writeCause = false;
             } else if (throwable instanceof OutOfMemoryError) {
                 writeVInt(15);
@@ -580,6 +647,8 @@ public abstract class StreamOutput extends OutputStream {
             } else if (throwable instanceof InterruptedException) {
                 writeVInt(18);
                 writeCause = false;
+            } else if (throwable instanceof IOException) {
+                writeVInt(19);
             } else {
                 ElasticsearchException ex;
                 if (throwable instanceof ElasticsearchException && ElasticsearchException.isRegistered(throwable.getClass())) {
@@ -606,23 +675,21 @@ public abstract class StreamOutput extends OutputStream {
     /**
      * Writes a {@link NamedWriteable} to the current stream, by first writing its name and then the object itself
      */
-    void writeNamedWriteable(NamedWriteable namedWriteable) throws IOException {
+    public void writeNamedWriteable(NamedWriteable<?> namedWriteable) throws IOException {
         writeString(namedWriteable.getWriteableName());
         namedWriteable.writeTo(this);
     }
 
     /**
-     * Writes a {@link QueryBuilder} to the current stream
+     * Write an optional {@link NamedWriteable} to the stream.
      */
-    public void writeQuery(QueryBuilder queryBuilder) throws IOException {
-        writeNamedWriteable(queryBuilder);
-    }
-
-    /**
-     * Writes a {@link ScoreFunctionBuilder} to the current stream
-     */
-    public void writeScoreFunction(ScoreFunctionBuilder<?> scoreFunctionBuilder) throws IOException {
-        writeNamedWriteable(scoreFunctionBuilder);
+    public void writeOptionalNamedWriteable(@Nullable NamedWriteable<?> namedWriteable) throws IOException {
+        if (namedWriteable == null) {
+            writeBoolean(false);
+        } else {
+            writeBoolean(true);
+            writeNamedWriteable(namedWriteable);
+        }
     }
 
     /**
@@ -631,5 +698,34 @@ public abstract class StreamOutput extends OutputStream {
     public void writeGeoPoint(GeoPoint geoPoint) throws IOException {
         writeDouble(geoPoint.lat());
         writeDouble(geoPoint.lon());
+    }
+
+    /**
+     * Write a {@linkplain DateTimeZone} to the stream.
+     */
+    public void writeTimeZone(DateTimeZone timeZone) throws IOException {
+        writeString(timeZone.getID());
+    }
+
+    /**
+     * Write an optional {@linkplain DateTimeZone} to the stream.
+     */
+    public void writeOptionalTimeZone(DateTimeZone timeZone) throws IOException {
+        if (timeZone == null) {
+            writeBoolean(false);
+        } else {
+            writeBoolean(true);
+            writeTimeZone(timeZone);
+        }
+    }
+
+    /**
+     * Writes a list of {@link Writeable} objects
+     */
+    public <T extends Writeable<T>> void writeList(List<T> list) throws IOException {
+        writeVInt(list.size());
+        for (T obj: list) {
+            obj.writeTo(this);
+        }
     }
 }

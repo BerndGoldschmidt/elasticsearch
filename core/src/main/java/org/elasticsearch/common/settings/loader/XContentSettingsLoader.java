@@ -38,6 +38,12 @@ public abstract class XContentSettingsLoader implements SettingsLoader {
 
     public abstract XContentType contentType();
 
+    private final boolean allowNullValues;
+
+    XContentSettingsLoader(boolean allowNullValues) {
+        this.allowNullValues = allowNullValues;
+    }
+
     @Override
     public Map<String, String> load(String source) throws IOException {
         try (XContentParser parser = XContentFactory.xContent(contentType()).createParser(source)) {
@@ -103,9 +109,9 @@ public abstract class XContentSettingsLoader implements SettingsLoader {
             } else if (token == XContentParser.Token.FIELD_NAME) {
                 currentFieldName = parser.currentName();
             } else if (token == XContentParser.Token.VALUE_NULL) {
-                // ignore this
+                serializeValue(settings, sb, path, parser, currentFieldName, true);
             } else {
-                serializeValue(settings, sb, path, parser, currentFieldName);
+                serializeValue(settings, sb, path, parser, currentFieldName, false);
 
             }
         }
@@ -126,31 +132,43 @@ public abstract class XContentSettingsLoader implements SettingsLoader {
             } else if (token == XContentParser.Token.FIELD_NAME) {
                 fieldName = parser.currentName();
             } else if (token == XContentParser.Token.VALUE_NULL) {
+                serializeValue(settings, sb, path, parser, fieldName + '.' + (counter++), true);
                 // ignore
             } else {
-                serializeValue(settings, sb, path, parser, fieldName + '.' + (counter++));
+                serializeValue(settings, sb, path, parser, fieldName + '.' + (counter++), false);
             }
         }
     }
 
-    private void serializeValue(Map<String, String> settings, StringBuilder sb, List<String> path, XContentParser parser, String fieldName) throws IOException {
+    private void serializeValue(Map<String, String> settings, StringBuilder sb, List<String> path, XContentParser parser, String fieldName, boolean isNull) throws IOException {
         sb.setLength(0);
         for (String pathEle : path) {
             sb.append(pathEle).append('.');
         }
         sb.append(fieldName);
         String key = sb.toString();
-        String currentValue = parser.text();
-        String previousValue = settings.put(key, currentValue);
-        if (previousValue != null) {
+        String currentValue = isNull ? null : parser.text();
+
+        if (settings.containsKey(key)) {
             throw new ElasticsearchParseException(
                     "duplicate settings key [{}] found at line number [{}], column number [{}], previous value [{}], current value [{}]",
                     key,
                     parser.getTokenLocation().lineNumber,
                     parser.getTokenLocation().columnNumber,
-                    previousValue,
+                    settings.get(key),
                     currentValue
             );
         }
+
+        if (currentValue == null && !allowNullValues) {
+            throw new ElasticsearchParseException(
+                    "null-valued setting found for key [{}] found at line number [{}], column number [{}]",
+                    key,
+                    parser.getTokenLocation().lineNumber,
+                    parser.getTokenLocation().columnNumber
+            );
+        }
+
+        settings.put(key, currentValue);
     }
 }

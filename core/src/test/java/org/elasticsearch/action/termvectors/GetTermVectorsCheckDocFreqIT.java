@@ -24,7 +24,6 @@ import org.apache.lucene.index.PostingsEnum;
 import org.apache.lucene.index.Terms;
 import org.apache.lucene.index.TermsEnum;
 import org.apache.lucene.util.BytesRef;
-import org.elasticsearch.common.io.BytesStream;
 import org.elasticsearch.common.settings.Settings;
 import org.elasticsearch.common.xcontent.ToXContent;
 import org.elasticsearch.common.xcontent.XContentBuilder;
@@ -62,7 +61,7 @@ public class GetTermVectorsCheckDocFreqIT extends ESIntegTestCase {
         XContentBuilder mapping = XContentFactory.jsonBuilder().startObject().startObject("type1")
                 .startObject("properties")
                         .startObject("field")
-                            .field("type", "string")
+                            .field("type", "text")
                             .field("term_vector", "with_positions_offsets_payloads")
                             .field("analyzer", "tv_test")
                         .endObject()
@@ -100,7 +99,7 @@ public class GetTermVectorsCheckDocFreqIT extends ESIntegTestCase {
         Fields fields = response.getFields();
         assertThat(fields.size(), equalTo(1));
         Terms terms = fields.terms("field");
-        assertThat(terms.size(), equalTo(8l));
+        assertThat(terms.size(), equalTo(8L));
         assertThat(terms.getSumTotalTermFreq(), Matchers.equalTo((long) -1));
         assertThat(terms.getDocCount(), Matchers.equalTo(-1));
         assertThat(terms.getSumDocFreq(), equalTo((long) -1));
@@ -159,7 +158,7 @@ public class GetTermVectorsCheckDocFreqIT extends ESIntegTestCase {
         Fields fields = response.getFields();
         assertThat(fields.size(), equalTo(1));
         Terms terms = fields.terms("field");
-        assertThat(terms.size(), equalTo(8l));
+        assertThat(terms.size(), equalTo(8L));
         assertThat(terms.getSumTotalTermFreq(), Matchers.equalTo((long) (9 * numDocs)));
         assertThat(terms.getDocCount(), Matchers.equalTo(numDocs));
         assertThat(terms.getSumDocFreq(), equalTo((long) numDocs * values.length));
@@ -215,7 +214,7 @@ public class GetTermVectorsCheckDocFreqIT extends ESIntegTestCase {
         Fields fields = response.getFields();
         assertThat(fields.size(), equalTo(1));
         Terms terms = fields.terms("field");
-        assertThat(terms.size(), equalTo(8l));
+        assertThat(terms.size(), equalTo(8L));
         assertThat(terms.getSumTotalTermFreq(), Matchers.equalTo((long) (9 * numDocs)));
         assertThat(terms.getDocCount(), Matchers.equalTo(numDocs));
         assertThat(terms.getSumDocFreq(), equalTo((long) numDocs * values.length));

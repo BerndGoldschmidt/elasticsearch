@@ -20,7 +20,12 @@
 
 package org.elasticsearch.search;
 
-import org.apache.lucene.index.*;
+import org.apache.lucene.index.BinaryDocValues;
+import org.apache.lucene.index.DocValues;
+import org.apache.lucene.index.NumericDocValues;
+import org.apache.lucene.index.RandomAccessOrds;
+import org.apache.lucene.index.SortedDocValues;
+import org.apache.lucene.index.SortedNumericDocValues;
 import org.apache.lucene.search.DocIdSetIterator;
 import org.apache.lucene.util.BitSet;
 import org.apache.lucene.util.Bits;
@@ -934,11 +939,6 @@ public enum MultiValueMode implements Writeable<MultiValueMode> {
     }
 
     public static MultiValueMode readMultiValueModeFrom(StreamInput in) throws IOException {
-        return MultiValueMode.AVG.readFrom(in);
-    }
-
-    @Override
-    public MultiValueMode readFrom(StreamInput in) throws IOException {
         int ordinal = in.readVInt();
         if (ordinal < 0 || ordinal >= values().length) {
             throw new IOException("Unknown MultiValueMode ordinal [" + ordinal + "]");

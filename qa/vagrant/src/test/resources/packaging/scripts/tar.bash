@@ -68,6 +68,7 @@ move_elasticsearch() {
 
 # Export some useful paths.
 export_elasticsearch_paths() {
+    export ESMODULES="$ESHOME/modules"
     export ESPLUGINS="$ESHOME/plugins"
     export ESCONFIG="$ESHOME/config"
     export ESSCRIPTS="$ESCONFIG/scripts"
@@ -82,7 +83,7 @@ verify_archive_installation() {
     assert_file "$ESHOME/bin" d
     assert_file "$ESHOME/bin/elasticsearch" f
     assert_file "$ESHOME/bin/elasticsearch.in.sh" f
-    assert_file "$ESHOME/bin/plugin" f
+    assert_file "$ESHOME/bin/elasticsearch-plugin" f
     assert_file "$ESCONFIG" d
     assert_file "$ESCONFIG/elasticsearch.yml" f
     assert_file "$ESCONFIG/logging.yml" f

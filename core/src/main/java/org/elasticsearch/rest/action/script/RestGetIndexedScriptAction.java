@@ -24,9 +24,14 @@ import org.elasticsearch.client.Client;
 import org.elasticsearch.common.inject.Inject;
 import org.elasticsearch.common.settings.Settings;
 import org.elasticsearch.common.xcontent.XContentBuilder;
-import org.elasticsearch.common.xcontent.XContentBuilderString;
 import org.elasticsearch.index.VersionType;
-import org.elasticsearch.rest.*;
+import org.elasticsearch.rest.BaseRestHandler;
+import org.elasticsearch.rest.BytesRestResponse;
+import org.elasticsearch.rest.RestChannel;
+import org.elasticsearch.rest.RestController;
+import org.elasticsearch.rest.RestRequest;
+import org.elasticsearch.rest.RestResponse;
+import org.elasticsearch.rest.RestStatus;
 import org.elasticsearch.rest.action.support.RestBuilderListener;
 
 import static org.elasticsearch.rest.RestRequest.Method.GET;
@@ -42,13 +47,13 @@ public class RestGetIndexedScriptAction extends BaseRestHandler {
     }
 
     protected RestGetIndexedScriptAction(Settings settings, RestController controller, boolean registerDefaultHandlers, Client client) {
-        super(settings, controller, client);
+        super(settings, client);
         if (registerDefaultHandlers) {
             controller.registerHandler(GET, "/_scripts/{lang}/{id}", this);
         }
     }
 
-    protected XContentBuilderString getScriptFieldName() {
+    protected String getScriptFieldName() {
         return Fields.SCRIPT;
     }
 
@@ -81,10 +86,10 @@ public class RestGetIndexedScriptAction extends BaseRestHandler {
     }
 
     private static final class Fields {
-        private static final XContentBuilderString SCRIPT = new XContentBuilderString("script");
-        private static final XContentBuilderString LANG = new XContentBuilderString("lang");
-        private static final XContentBuilderString _ID = new XContentBuilderString("_id");
-        private static final XContentBuilderString _VERSION = new XContentBuilderString("_version");
-        private static final XContentBuilderString FOUND = new XContentBuilderString("found");
+        private static final String SCRIPT = "script";
+        private static final String LANG = "lang";
+        private static final String _ID = "_id";
+        private static final String _VERSION = "_version";
+        private static final String FOUND = "found";
     }
 }

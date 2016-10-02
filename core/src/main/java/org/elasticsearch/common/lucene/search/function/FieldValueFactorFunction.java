@@ -116,6 +116,11 @@ public class FieldValueFactorFunction extends ScoreFunction {
                 Objects.equals(this.modifier, fieldValueFactorFunction.modifier);
     }
 
+    @Override
+    protected int doHashCode() {
+        return Objects.hash(boostFactor, field, modifier);
+    }
+
     /**
      * The Type class encapsulates the modification types that can be applied
      * to the score/value product.
@@ -189,12 +194,7 @@ public class FieldValueFactorFunction extends ScoreFunction {
             out.writeVInt(this.ordinal());
         }
 
-        public static Modifier readModifierFrom(StreamInput in) throws IOException {
-            return Modifier.NONE.readFrom(in);
-        }
-
-        @Override
-        public Modifier readFrom(StreamInput in) throws IOException {
+        public static Modifier readFromStream(StreamInput in) throws IOException {
             int ordinal = in.readVInt();
             if (ordinal < 0 || ordinal >= values().length) {
                 throw new IOException("Unknown Modifier ordinal [" + ordinal + "]");

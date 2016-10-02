@@ -25,6 +25,7 @@ import org.elasticsearch.action.fieldstats.FieldStatsResponse;
 import org.elasticsearch.action.fieldstats.IndexConstraint;
 import org.elasticsearch.common.settings.Settings;
 import org.elasticsearch.index.mapper.core.DateFieldMapper;
+import org.elasticsearch.index.mapper.core.LegacyDateFieldMapper;
 import org.elasticsearch.test.ESSingleNodeTestCase;
 import org.joda.time.DateTime;
 import org.joda.time.DateTimeZone;
@@ -33,10 +34,15 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 
-import static org.elasticsearch.action.fieldstats.IndexConstraint.Comparison.*;
+import static org.elasticsearch.action.fieldstats.IndexConstraint.Comparison.GT;
+import static org.elasticsearch.action.fieldstats.IndexConstraint.Comparison.GTE;
+import static org.elasticsearch.action.fieldstats.IndexConstraint.Comparison.LT;
+import static org.elasticsearch.action.fieldstats.IndexConstraint.Comparison.LTE;
 import static org.elasticsearch.action.fieldstats.IndexConstraint.Property.MAX;
 import static org.elasticsearch.action.fieldstats.IndexConstraint.Property.MIN;
-import static org.hamcrest.Matchers.*;
+import static org.hamcrest.Matchers.containsString;
+import static org.hamcrest.Matchers.either;
+import static org.hamcrest.Matchers.equalTo;
 
 /**
  */
@@ -61,21 +67,21 @@ public class FieldStatsTests extends ESSingleNodeTestCase {
     }
 
     public void testLong() {
-        testNumberRange("field1", "long", 312321312312412l, 312321312312422l);
+        testNumberRange("field1", "long", 312321312312412L, 312321312312422L);
         testNumberRange("field1", "long", -5, 5);
-        testNumberRange("field1", "long", -312321312312422l, -312321312312412l);
+        testNumberRange("field1", "long", -312321312312422L, -312321312312412L);
     }
 
     public void testString() {
-        createIndex("test", Settings.EMPTY, "test", "field", "type=string");
+        createIndex("test", Settings.EMPTY, "test", "field", "type=text");
         for (int value = 0; value <= 10; value++) {
             client().prepareIndex("test", "test").setSource("field", String.format(Locale.ENGLISH, "%03d", value)).get();
         }
         client().admin().indices().prepareRefresh().get();
 
         FieldStatsResponse result = client().prepareFieldStats().setFields("field").get();
-        assertThat(result.getAllFieldStats().get("field").getMaxDoc(), equalTo(11l));
-        assertThat(result.getAllFieldStats().get("field").getDocCount(), equalTo(11l));
+        assertThat(result.getAllFieldStats().get("field").getMaxDoc(), equalTo(11L));
+        assertThat(result.getAllFieldStats().get("field").getDocCount(), equalTo(11L));
         assertThat(result.getAllFieldStats().get("field").getDensity(), equalTo(100));
         assertThat(result.getAllFieldStats().get("field").getMinValue(), equalTo(new BytesRef(String.format(Locale.ENGLISH, "%03d", 0))));
         assertThat(result.getAllFieldStats().get("field").getMaxValue(), equalTo(new BytesRef(String.format(Locale.ENGLISH, "%03d", 10))));
@@ -92,8 +98,8 @@ public class FieldStatsTests extends ESSingleNodeTestCase {
         client().admin().indices().prepareRefresh().get();
 
         FieldStatsResponse result = client().prepareFieldStats().setFields(fieldName).get();
-        assertThat(result.getAllFieldStats().get(fieldName).getMaxDoc(), equalTo(11l));
-        assertThat(result.getAllFieldStats().get(fieldName).getDocCount(), equalTo(11l));
+        assertThat(result.getAllFieldStats().get(fieldName).getMaxDoc(), equalTo(11L));
+        assertThat(result.getAllFieldStats().get(fieldName).getDocCount(), equalTo(11L));
         assertThat(result.getAllFieldStats().get(fieldName).getDensity(), equalTo(100));
         assertThat(result.getAllFieldStats().get(fieldName).getMinValue(), equalTo(-1d));
         assertThat(result.getAllFieldStats().get(fieldName).getMaxValue(), equalTo(9d));
@@ -109,11 +115,11 @@ public class FieldStatsTests extends ESSingleNodeTestCase {
         client().admin().indices().prepareRefresh().get();
 
         FieldStatsResponse result = client().prepareFieldStats().setFields(fieldName).get();
-        assertThat(result.getAllFieldStats().get(fieldName).getMaxDoc(), equalTo(11l));
-        assertThat(result.getAllFieldStats().get(fieldName).getDocCount(), equalTo(11l));
+        assertThat(result.getAllFieldStats().get(fieldName).getMaxDoc(), equalTo(11L));
+        assertThat(result.getAllFieldStats().get(fieldName).getDocCount(), equalTo(11L));
         assertThat(result.getAllFieldStats().get(fieldName).getDensity(), equalTo(100));
-        assertThat(result.getAllFieldStats().get(fieldName).getMinValue(), equalTo(-1f));
-        assertThat(result.getAllFieldStats().get(fieldName).getMaxValue(), equalTo(9f));
+        assertThat(result.getAllFieldStats().get(fieldName).getMinValue(), equalTo(-1d));
+        assertThat(result.getAllFieldStats().get(fieldName).getMaxValue(), equalTo(9d));
         assertThat(result.getAllFieldStats().get(fieldName).getMinValueAsString(), equalTo(Float.toString(-1)));
         assertThat(result.getAllFieldStats().get(fieldName).getMaxValueAsString(), equalTo(Float.toString(9)));
     }
@@ -139,52 +145,52 @@ public class FieldStatsTests extends ESSingleNodeTestCase {
 
     public void testMerge() {
         List<FieldStats> stats = new ArrayList<>();
-        stats.add(new FieldStats.Long(1, 1l, 1l, 1l, 1l, 1l));
-        stats.add(new FieldStats.Long(1, 1l, 1l, 1l, 1l, 1l));
-        stats.add(new FieldStats.Long(1, 1l, 1l, 1l, 1l, 1l));
+        stats.add(new FieldStats.Long(1, 1L, 1L, 1L, 1L, 1L));
+        stats.add(new FieldStats.Long(1, 1L, 1L, 1L, 1L, 1L));
+        stats.add(new FieldStats.Long(1, 1L, 1L, 1L, 1L, 1L));
 
-        FieldStats stat = new FieldStats.Long(1, 1l, 1l, 1l, 1l, 1l);
+        FieldStats stat = new FieldStats.Long(1, 1L, 1L, 1L, 1L, 1L);
         for (FieldStats otherStat : stats) {
             stat.append(otherStat);
         }
-        assertThat(stat.getMaxDoc(), equalTo(4l));
-        assertThat(stat.getDocCount(), equalTo(4l));
-        assertThat(stat.getSumDocFreq(), equalTo(4l));
-        assertThat(stat.getSumTotalTermFreq(), equalTo(4l));
+        assertThat(stat.getMaxDoc(), equalTo(4L));
+        assertThat(stat.getDocCount(), equalTo(4L));
+        assertThat(stat.getSumDocFreq(), equalTo(4L));
+        assertThat(stat.getSumTotalTermFreq(), equalTo(4L));
     }
 
     public void testMerge_notAvailable() {
         List<FieldStats> stats = new ArrayList<>();
-        stats.add(new FieldStats.Long(1, 1l, 1l, 1l, 1l, 1l));
-        stats.add(new FieldStats.Long(1, 1l, 1l, 1l, 1l, 1l));
-        stats.add(new FieldStats.Long(1, 1l, 1l, 1l, 1l, 1l));
+        stats.add(new FieldStats.Long(1, 1L, 1L, 1L, 1L, 1L));
+        stats.add(new FieldStats.Long(1, 1L, 1L, 1L, 1L, 1L));
+        stats.add(new FieldStats.Long(1, 1L, 1L, 1L, 1L, 1L));
 
-        FieldStats stat = new FieldStats.Long(1, -1l, -1l, -1l, 1l, 1l);
+        FieldStats stat = new FieldStats.Long(1, -1L, -1L, -1L, 1L, 1L);
         for (FieldStats otherStat : stats) {
             stat.append(otherStat);
         }
-        assertThat(stat.getMaxDoc(), equalTo(4l));
-        assertThat(stat.getDocCount(), equalTo(-1l));
-        assertThat(stat.getSumDocFreq(), equalTo(-1l));
-        assertThat(stat.getSumTotalTermFreq(), equalTo(-1l));
+        assertThat(stat.getMaxDoc(), equalTo(4L));
+        assertThat(stat.getDocCount(), equalTo(-1L));
+        assertThat(stat.getSumDocFreq(), equalTo(-1L));
+        assertThat(stat.getSumTotalTermFreq(), equalTo(-1L));
 
-        stats.add(new FieldStats.Long(1, -1l, -1l, -1l, 1l, 1l));
+        stats.add(new FieldStats.Long(1, -1L, -1L, -1L, 1L, 1L));
         stat = stats.remove(0);
         for (FieldStats otherStat : stats) {
             stat.append(otherStat);
         }
-        assertThat(stat.getMaxDoc(), equalTo(4l));
-        assertThat(stat.getDocCount(), equalTo(-1l));
-        assertThat(stat.getSumDocFreq(), equalTo(-1l));
-        assertThat(stat.getSumTotalTermFreq(), equalTo(-1l));
+        assertThat(stat.getMaxDoc(), equalTo(4L));
+        assertThat(stat.getDocCount(), equalTo(-1L));
+        assertThat(stat.getSumDocFreq(), equalTo(-1L));
+        assertThat(stat.getSumTotalTermFreq(), equalTo(-1L));
     }
 
     public void testInvalidField() {
-        createIndex("test1", Settings.EMPTY, "test", "field1", "type=string");
+        createIndex("test1", Settings.EMPTY, "test", "field1", "type=text");
         client().prepareIndex("test1", "test").setSource("field1", "a").get();
         client().prepareIndex("test1", "test").setSource("field1", "b").get();
 
-        createIndex("test2", Settings.EMPTY, "test", "field2",  "type=string");
+        createIndex("test2", Settings.EMPTY, "test", "field2",  "type=text");
         client().prepareIndex("test2", "test").setSource("field2", "a").get();
         client().prepareIndex("test2", "test").setSource("field2", "b").get();
         client().admin().indices().prepareRefresh().get();
@@ -208,9 +214,9 @@ public class FieldStatsTests extends ESSingleNodeTestCase {
 
     public void testNumberFiltering() {
         createIndex("test1", Settings.EMPTY, "type", "value", "type=long");
-        client().prepareIndex("test1", "test").setSource("value", 1l).get();
+        client().prepareIndex("test1", "test").setSource("value", 1L).get();
         createIndex("test2", Settings.EMPTY, "type", "value", "type=long");
-        client().prepareIndex("test2", "test").setSource("value", 3l).get();
+        client().prepareIndex("test2", "test").setSource("value", 3L).get();
         client().admin().indices().prepareRefresh().get();
 
         FieldStatsResponse response = client().prepareFieldStats()
@@ -218,8 +224,8 @@ public class FieldStatsTests extends ESSingleNodeTestCase {
                 .setLevel("indices")
                 .get();
         assertThat(response.getIndicesMergedFieldStats().size(), equalTo(2));
-        assertThat(response.getIndicesMergedFieldStats().get("test1").get("value").getMinValue(), equalTo(1l));
-        assertThat(response.getIndicesMergedFieldStats().get("test2").get("value").getMinValue(), equalTo(3l));
+        assertThat(response.getIndicesMergedFieldStats().get("test1").get("value").getMinValue(), equalTo(1L));
+        assertThat(response.getIndicesMergedFieldStats().get("test2").get("value").getMinValue(), equalTo(3L));
 
         response = client().prepareFieldStats()
                 .setFields("value")
@@ -241,7 +247,7 @@ public class FieldStatsTests extends ESSingleNodeTestCase {
                 .setLevel("indices")
                 .get();
         assertThat(response.getIndicesMergedFieldStats().size(), equalTo(1));
-        assertThat(response.getIndicesMergedFieldStats().get("test1").get("value").getMinValue(), equalTo(1l));
+        assertThat(response.getIndicesMergedFieldStats().get("test1").get("value").getMinValue(), equalTo(1L));
 
         response = client().prepareFieldStats()
                 .setFields("value")
@@ -249,7 +255,7 @@ public class FieldStatsTests extends ESSingleNodeTestCase {
                 .setLevel("indices")
                 .get();
         assertThat(response.getIndicesMergedFieldStats().size(), equalTo(1));
-        assertThat(response.getIndicesMergedFieldStats().get("test1").get("value").getMinValue(), equalTo(1l));
+        assertThat(response.getIndicesMergedFieldStats().get("test1").get("value").getMinValue(), equalTo(1L));
 
         response = client().prepareFieldStats()
                 .setFields("value")
@@ -264,7 +270,7 @@ public class FieldStatsTests extends ESSingleNodeTestCase {
                 .setLevel("indices")
                 .get();
         assertThat(response.getIndicesMergedFieldStats().size(), equalTo(1));
-        assertThat(response.getIndicesMergedFieldStats().get("test2").get("value").getMinValue(), equalTo(3l));
+        assertThat(response.getIndicesMergedFieldStats().get("test2").get("value").getMinValue(), equalTo(3L));
 
         response = client().prepareFieldStats()
                 .setFields("value")
@@ -272,7 +278,7 @@ public class FieldStatsTests extends ESSingleNodeTestCase {
                 .setLevel("indices")
                 .get();
         assertThat(response.getIndicesMergedFieldStats().size(), equalTo(1));
-        assertThat(response.getIndicesMergedFieldStats().get("test2").get("value").getMinValue(), equalTo(3l));
+        assertThat(response.getIndicesMergedFieldStats().get("test2").get("value").getMinValue(), equalTo(3L));
 
         response = client().prepareFieldStats()
                 .setFields("value")
@@ -287,8 +293,8 @@ public class FieldStatsTests extends ESSingleNodeTestCase {
                 .setLevel("indices")
                 .get();
         assertThat(response.getIndicesMergedFieldStats().size(), equalTo(2));
-        assertThat(response.getIndicesMergedFieldStats().get("test1").get("value").getMinValue(), equalTo(1l));
-        assertThat(response.getIndicesMergedFieldStats().get("test2").get("value").getMinValue(), equalTo(3l));
+        assertThat(response.getIndicesMergedFieldStats().get("test1").get("value").getMinValue(), equalTo(1L));
+        assertThat(response.getIndicesMergedFieldStats().get("test2").get("value").getMinValue(), equalTo(3L));
 
         response = client().prepareFieldStats()
                 .setFields("value")
@@ -300,9 +306,9 @@ public class FieldStatsTests extends ESSingleNodeTestCase {
 
     public void testDateFiltering() {
         DateTime dateTime1 = new DateTime(2014, 1, 1, 0, 0, 0, 0, DateTimeZone.UTC);
-        String dateTime1Str = DateFieldMapper.Defaults.DATE_TIME_FORMATTER.parser().print(dateTime1);
+        String dateTime1Str = DateFieldMapper.DEFAULT_DATE_TIME_FORMATTER.parser().print(dateTime1);
         DateTime dateTime2 = new DateTime(2014, 1, 2, 0, 0, 0, 0, DateTimeZone.UTC);
-        String dateTime2Str = DateFieldMapper.Defaults.DATE_TIME_FORMATTER.parser().print(dateTime2);
+        String dateTime2Str = DateFieldMapper.DEFAULT_DATE_TIME_FORMATTER.parser().print(dateTime2);
 
         createIndex("test1", Settings.EMPTY, "type", "value", "type=date");
         client().prepareIndex("test1", "test").setSource("value", dateTime1Str).get();

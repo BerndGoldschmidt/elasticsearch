@@ -22,14 +22,10 @@ package org.elasticsearch.index.mapper.internal;
 import org.apache.lucene.document.Field;
 import org.apache.lucene.document.StoredField;
 import org.apache.lucene.index.IndexOptions;
-import org.apache.lucene.util.BytesRef;
-import org.elasticsearch.ElasticsearchParseException;
 import org.elasticsearch.Version;
 import org.elasticsearch.common.Strings;
-import org.elasticsearch.common.bytes.BytesArray;
 import org.elasticsearch.common.bytes.BytesReference;
 import org.elasticsearch.common.collect.Tuple;
-import org.elasticsearch.common.compress.CompressorFactory;
 import org.elasticsearch.common.io.stream.BytesStreamOutput;
 import org.elasticsearch.common.lucene.Lucene;
 import org.elasticsearch.common.settings.Settings;
@@ -41,17 +37,17 @@ import org.elasticsearch.common.xcontent.support.XContentMapValues;
 import org.elasticsearch.index.mapper.MappedFieldType;
 import org.elasticsearch.index.mapper.Mapper;
 import org.elasticsearch.index.mapper.MapperParsingException;
-import org.elasticsearch.index.mapper.MergeResult;
 import org.elasticsearch.index.mapper.MetadataFieldMapper;
 import org.elasticsearch.index.mapper.ParseContext;
 
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 
-import static org.elasticsearch.common.xcontent.support.XContentMapValues.nodeBooleanValue;
+import static org.elasticsearch.common.xcontent.support.XContentMapValues.lenientNodeBooleanValue;
 
 /**
  *
@@ -74,7 +70,7 @@ public class SourceFieldMapper extends MetadataFieldMapper {
             FIELD_TYPE.setOmitNorms(true);
             FIELD_TYPE.setIndexAnalyzer(Lucene.KEYWORD_ANALYZER);
             FIELD_TYPE.setSearchAnalyzer(Lucene.KEYWORD_ANALYZER);
-            FIELD_TYPE.setNames(new MappedFieldType.Names(NAME));
+            FIELD_TYPE.setName(NAME);
             FIELD_TYPE.freeze();
         }
 
@@ -88,7 +84,7 @@ public class SourceFieldMapper extends MetadataFieldMapper {
         private String[] excludes = null;
 
         public Builder() {
-            super(Defaults.NAME, Defaults.FIELD_TYPE);
+            super(Defaults.NAME, Defaults.FIELD_TYPE, Defaults.FIELD_TYPE);
         }
 
         public Builder enabled(boolean enabled) {
@@ -122,10 +118,10 @@ public class SourceFieldMapper extends MetadataFieldMapper {
                 String fieldName = Strings.toUnderscoreCase(entry.getKey());
                 Object fieldNode = entry.getValue();
                 if (fieldName.equals("enabled")) {
-                    builder.enabled(nodeBooleanValue(fieldNode));
+                    builder.enabled(lenientNodeBooleanValue(fieldNode));
                     iterator.remove();
-                } else if ("format".equals(fieldName) && parserContext.indexVersionCreated().before(Version.V_3_0_0)) {
-                    // ignore on old indices, reject on and after 3.0
+                } else if ("format".equals(fieldName) && parserContext.indexVersionCreated().before(Version.V_5_0_0_alpha1)) {
+                    // ignore on old indices, reject on and after 5.0
                     iterator.remove();
                 } else if (fieldName.equals("includes")) {
                     List<Object> values = (List<Object>) fieldNode;
@@ -170,24 +166,6 @@ public class SourceFieldMapper extends MetadataFieldMapper {
         @Override
         public String typeName() {
             return CONTENT_TYPE;
-        }
-
-        @Override
-        public byte[] value(Object value) {
-            if (value == null) {
-                return null;
-            }
-            BytesReference bValue;
-            if (value instanceof BytesRef) {
-                bValue = new BytesArray((BytesRef) value);
-            } else {
-                bValue = (BytesReference) value;
-            }
-            try {
-                return CompressorFactory.uncompressIfNeeded(bValue).toBytes();
-            } catch (IOException e) {
-                throw new ElasticsearchParseException("failed to decompress source", e);
-            }
         }
     }
 
@@ -251,10 +229,11 @@ public class SourceFieldMapper extends MetadataFieldMapper {
         if (!fieldType().stored()) {
             return;
         }
-        if (context.flyweight()) {
+        BytesReference source = context.source();
+        // Percolate and tv APIs may not set the source and that is ok, because these APIs will not index any data
+        if (source == null) {
             return;
         }
-        BytesReference source = context.source();
 
         boolean filtered = (includes != null && includes.length > 0) || (excludes != null && excludes.length > 0);
         if (filtered) {
@@ -272,7 +251,7 @@ public class SourceFieldMapper extends MetadataFieldMapper {
         if (!source.hasArray()) {
             source = source.toBytesArray();
         }
-        fields.add(new StoredField(fieldType().names().indexName(), source.array(), source.arrayOffset(), source.length()));
+        fields.add(new StoredField(fieldType().name(), source.array(), source.arrayOffset(), source.length()));
     }
 
     @Override
@@ -310,18 +289,20 @@ public class SourceFieldMapper extends MetadataFieldMapper {
     }
 
     @Override
-    public void merge(Mapper mergeWith, MergeResult mergeResult) {
+    protected void doMerge(Mapper mergeWith, boolean updateAllTypes) {
         SourceFieldMapper sourceMergeWith = (SourceFieldMapper) mergeWith;
-        if (mergeResult.simulate()) {
-            if (this.enabled != sourceMergeWith.enabled) {
-                mergeResult.addConflict("Cannot update enabled setting for [_source]");
-            }
-            if (Arrays.equals(includes(), sourceMergeWith.includes()) == false) {
-                mergeResult.addConflict("Cannot update includes setting for [_source]");
-            }
-            if (Arrays.equals(excludes(), sourceMergeWith.excludes()) == false) {
-                mergeResult.addConflict("Cannot update excludes setting for [_source]");
-            }
+        List<String> conflicts = new ArrayList<>();
+        if (this.enabled != sourceMergeWith.enabled) {
+            conflicts.add("Cannot update enabled setting for [_source]");
+        }
+        if (Arrays.equals(includes(), sourceMergeWith.includes()) == false) {
+            conflicts.add("Cannot update includes setting for [_source]");
+        }
+        if (Arrays.equals(excludes(), sourceMergeWith.excludes()) == false) {
+            conflicts.add("Cannot update excludes setting for [_source]");
+        }
+        if (conflicts.isEmpty() == false) {
+            throw new IllegalArgumentException("Can't merge because of conflicts: " + conflicts);
         }
     }
 }

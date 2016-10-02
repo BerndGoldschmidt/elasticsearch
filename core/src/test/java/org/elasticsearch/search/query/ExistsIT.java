@@ -40,7 +40,6 @@ import static java.util.Collections.emptyMap;
 import static java.util.Collections.singletonMap;
 import static org.elasticsearch.test.hamcrest.ElasticsearchAssertions.assertAcked;
 import static org.elasticsearch.test.hamcrest.ElasticsearchAssertions.assertHitCount;
-import static org.elasticsearch.test.hamcrest.ElasticsearchAssertions.assertSearchHits;
 import static org.elasticsearch.test.hamcrest.ElasticsearchAssertions.assertSearchResponse;
 
 public class ExistsIT extends ESIntegTestCase {
@@ -59,24 +58,21 @@ public class ExistsIT extends ESIntegTestCase {
         XContentBuilder mapping = XContentBuilder.builder(JsonXContent.jsonXContent)
             .startObject()
                 .startObject("type")
-                    .startObject(FieldNamesFieldMapper.NAME)
-                        .field("enabled", randomBoolean())
-                    .endObject()
                     .startObject("properties")
                         .startObject("foo")
-                            .field("type", "string")
+                            .field("type", "text")
                         .endObject()
                         .startObject("bar")
                             .field("type", "object")
                             .startObject("properties")
                                 .startObject("foo")
-                                    .field("type", "string")
+                                    .field("type", "text")
                                 .endObject()
                                 .startObject("bar")
                                     .field("type", "object")
                                     .startObject("properties")
                                         .startObject("bar")
-                                            .field("type", "string")
+                                            .field("type", "text")
                                         .endObject()
                                     .endObject()
                                 .endObject()
@@ -90,10 +86,10 @@ public class ExistsIT extends ESIntegTestCase {
             .endObject();
 
         assertAcked(client().admin().indices().prepareCreate("idx").addMapping("type", mapping));
-        @SuppressWarnings("unchecked")
         Map<String, Object> barObject = new HashMap<>();
         barObject.put("foo", "bar");
         barObject.put("bar", singletonMap("bar", "foo"));
+        @SuppressWarnings("unchecked")
         final Map<String, Object>[] sources = new Map[] {
                 // simple property
                 singletonMap("foo", "bar"),
