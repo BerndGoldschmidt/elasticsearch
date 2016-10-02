@@ -21,14 +21,12 @@ package org.elasticsearch.action.admin.cluster.stats;
 
 import com.carrotsearch.hppc.ObjectIntHashMap;
 import com.carrotsearch.hppc.cursors.ObjectIntCursor;
-
 import org.elasticsearch.Version;
 import org.elasticsearch.action.admin.cluster.node.info.NodeInfo;
 import org.elasticsearch.action.admin.cluster.node.stats.NodeStats;
 import org.elasticsearch.cluster.node.DiscoveryNode;
-import org.elasticsearch.common.io.stream.StreamInput;
-import org.elasticsearch.common.io.stream.StreamOutput;
-import org.elasticsearch.common.io.stream.Writeable;
+import org.elasticsearch.common.network.NetworkModule;
+import org.elasticsearch.common.settings.Settings;
 import org.elasticsearch.common.transport.InetSocketTransportAddress;
 import org.elasticsearch.common.transport.TransportAddress;
 import org.elasticsearch.common.unit.ByteSizeValue;
@@ -42,13 +40,15 @@ import org.elasticsearch.plugins.PluginInfo;
 import java.io.IOException;
 import java.net.InetAddress;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicInteger;
 
-public class ClusterStatsNodes implements ToXContent, Writeable<ClusterStatsNodes> {
+public class ClusterStatsNodes implements ToXContent {
 
     private final Counts counts;
     private final Set<Version> versions;
@@ -57,34 +57,14 @@ public class ClusterStatsNodes implements ToXContent, Writeable<ClusterStatsNode
     private final JvmStats jvm;
     private final FsInfo.Path fs;
     private final Set<PluginInfo> plugins;
+    private final NetworkTypes networkTypes;
 
-    ClusterStatsNodes(StreamInput in) throws IOException {
-        this.counts = new Counts(in);
-
-        int size = in.readVInt();
-        this.versions = new HashSet<>(size);
-        for (int i = 0; i < size; i++) {
-            this.versions.add(Version.readVersion(in));
-        }
-
-        this.os = new OsStats(in);
-        this.process = new ProcessStats(in);
-        this.jvm = new JvmStats(in);
-        this.fs = new FsInfo.Path(in);
-
-        size = in.readVInt();
-        this.plugins = new HashSet<>(size);
-        for (int i = 0; i < size; i++) {
-            this.plugins.add(PluginInfo.readFromStream(in));
-        }
-    }
-
-    ClusterStatsNodes(ClusterStatsNodeResponse[] nodeResponses) {
+    ClusterStatsNodes(List<ClusterStatsNodeResponse> nodeResponses) {
         this.versions = new HashSet<>();
         this.fs = new FsInfo.Path();
         this.plugins = new HashSet<>();
 
-        Set<InetAddress> seenAddresses = new HashSet<>(nodeResponses.length);
+        Set<InetAddress> seenAddresses = new HashSet<>(nodeResponses.size());
         List<NodeInfo> nodeInfos = new ArrayList<>();
         List<NodeStats> nodeStats = new ArrayList<>();
         for (ClusterStatsNodeResponse nodeResponse : nodeResponses) {
@@ -103,13 +83,14 @@ public class ClusterStatsNodes implements ToXContent, Writeable<ClusterStatsNode
                 continue;
             }
             if (nodeResponse.nodeStats().getFs() != null) {
-                this.fs.add(nodeResponse.nodeStats().getFs().total());
+                this.fs.add(nodeResponse.nodeStats().getFs().getTotal());
             }
         }
         this.counts = new Counts(nodeInfos);
-        this.os = new OsStats(nodeInfos);
+        this.os = new OsStats(nodeInfos, nodeStats);
         this.process = new ProcessStats(nodeStats);
         this.jvm = new JvmStats(nodeInfos, nodeStats);
+        this.networkTypes = new NetworkTypes(nodeInfos);
     }
 
     public Counts getCounts() {
@@ -140,21 +121,6 @@ public class ClusterStatsNodes implements ToXContent, Writeable<ClusterStatsNode
         return plugins;
     }
 
-    @Override
-    public void writeTo(StreamOutput out) throws IOException {
-        counts.writeTo(out);
-        out.writeVInt(versions.size());
-        for (Version v : versions) Version.writeVersion(v, out);
-        os.writeTo(out);
-        process.writeTo(out);
-        jvm.writeTo(out);
-        fs.writeTo(out);
-        out.writeVInt(plugins.size());
-        for (PluginInfo p : plugins) {
-            p.writeTo(out);
-        }
-    }
-
     static final class Fields {
         static final String COUNT = "count";
         static final String VERSIONS = "versions";
@@ -163,6 +129,7 @@ public class ClusterStatsNodes implements ToXContent, Writeable<ClusterStatsNode
         static final String JVM = "jvm";
         static final String FS = "fs";
         static final String PLUGINS = "plugins";
+        static final String NETWORK_TYPES = "network_types";
     }
 
     @Override
@@ -197,20 +164,18 @@ public class ClusterStatsNodes implements ToXContent, Writeable<ClusterStatsNode
             pluginInfo.toXContent(builder, params);
         }
         builder.endArray();
+
+        builder.startObject(Fields.NETWORK_TYPES);
+        networkTypes.toXContent(builder, params);
+        builder.endObject();
         return builder;
     }
 
-    public static class Counts implements Writeable<Counts>, ToXContent {
+    public static class Counts implements ToXContent {
         static final String COORDINATING_ONLY = "coordinating_only";
 
         private final int total;
         private final Map<String, Integer> roles;
-
-        @SuppressWarnings("unchecked")
-        private Counts(StreamInput in) throws IOException {
-            this.total = in.readVInt();
-            this.roles = (Map<String, Integer>)in.readGenericValue();
-        }
 
         private Counts(List<NodeInfo> nodeInfos) {
             this.roles = new HashMap<>();
@@ -243,12 +208,6 @@ public class ClusterStatsNodes implements ToXContent, Writeable<ClusterStatsNode
             return roles;
         }
 
-        @Override
-        public void writeTo(StreamOutput out) throws IOException {
-            out.writeVInt(total);
-            out.writeGenericValue(roles);
-        }
-
         static final class Fields {
             static final String TOTAL = "total";
         }
@@ -263,15 +222,16 @@ public class ClusterStatsNodes implements ToXContent, Writeable<ClusterStatsNode
         }
     }
 
-    public static class OsStats implements ToXContent, Writeable<OsStats> {
+    public static class OsStats implements ToXContent {
         final int availableProcessors;
         final int allocatedProcessors;
         final ObjectIntHashMap<String> names;
+        final org.elasticsearch.monitor.os.OsStats.Mem mem;
 
         /**
          * Build the stats from information about each node.
          */
-        private OsStats(List<NodeInfo> nodeInfos) {
+        private OsStats(List<NodeInfo> nodeInfos, List<NodeStats> nodeStatsList) {
             this.names = new ObjectIntHashMap<>();
             int availableProcessors = 0;
             int allocatedProcessors = 0;
@@ -285,30 +245,22 @@ public class ClusterStatsNodes implements ToXContent, Writeable<ClusterStatsNode
             }
             this.availableProcessors = availableProcessors;
             this.allocatedProcessors = allocatedProcessors;
-        }
 
-        /**
-         * Read from a stream.
-         */
-        private OsStats(StreamInput in) throws IOException {
-            this.availableProcessors = in.readVInt();
-            this.allocatedProcessors = in.readVInt();
-            int size = in.readVInt();
-            this.names = new ObjectIntHashMap<>();
-            for (int i = 0; i < size; i++) {
-                names.addTo(in.readString(), in.readVInt());
+            long totalMemory = 0;
+            long freeMemory = 0;
+            for (NodeStats nodeStats : nodeStatsList) {
+                if (nodeStats.getOs() != null) {
+                    long total = nodeStats.getOs().getMem().getTotal().getBytes();
+                    if (total > 0) {
+                        totalMemory += total;
+                    }
+                    long free = nodeStats.getOs().getMem().getFree().getBytes();
+                    if (free > 0) {
+                        freeMemory += free;
+                    }
+                }
             }
-        }
-
-        @Override
-        public void writeTo(StreamOutput out) throws IOException {
-            out.writeVInt(availableProcessors);
-            out.writeVInt(allocatedProcessors);
-            out.writeVInt(names.size());
-            for (ObjectIntCursor<String> name : names) {
-                out.writeString(name.key);
-                out.writeVInt(name.value);
-            }
+            this.mem = new org.elasticsearch.monitor.os.OsStats.Mem(totalMemory, freeMemory);
         }
 
         public int getAvailableProcessors() {
@@ -317,6 +269,10 @@ public class ClusterStatsNodes implements ToXContent, Writeable<ClusterStatsNode
 
         public int getAllocatedProcessors() {
             return allocatedProcessors;
+        }
+
+        public org.elasticsearch.monitor.os.OsStats.Mem getMem() {
+            return mem;
         }
 
         static final class Fields {
@@ -339,11 +295,12 @@ public class ClusterStatsNodes implements ToXContent, Writeable<ClusterStatsNode
                 builder.endObject();
             }
             builder.endArray();
+            mem.toXContent(builder, params);
             return builder;
         }
     }
 
-    public static class ProcessStats implements ToXContent, Writeable<ProcessStats> {
+    public static class ProcessStats implements ToXContent {
 
         final int count;
         final int cpuPercent;
@@ -383,27 +340,6 @@ public class ClusterStatsNodes implements ToXContent, Writeable<ClusterStatsNode
             this.minOpenFileDescriptors = minOpenFileDescriptors;
             this.maxOpenFileDescriptors = maxOpenFileDescriptors;
         }
-
-        /**
-         * Read from a stream.
-         */
-        private ProcessStats(StreamInput in) throws IOException {
-            this.count = in.readVInt();
-            this.cpuPercent = in.readVInt();
-            this.totalOpenFileDescriptors = in.readVLong();
-            this.minOpenFileDescriptors = in.readLong();
-            this.maxOpenFileDescriptors = in.readLong();
-        }
-
-        @Override
-        public void writeTo(StreamOutput out) throws IOException {
-            out.writeVInt(count);
-            out.writeVInt(cpuPercent);
-            out.writeVLong(totalOpenFileDescriptors);
-            out.writeLong(minOpenFileDescriptors);
-            out.writeLong(maxOpenFileDescriptors);
-        }
-
 
         /**
          * Cpu usage in percentages - 100 is 1 core.
@@ -456,7 +392,7 @@ public class ClusterStatsNodes implements ToXContent, Writeable<ClusterStatsNode
         }
     }
 
-    public static class JvmStats implements Writeable<JvmStats>, ToXContent {
+    public static class JvmStats implements ToXContent {
 
         private final ObjectIntHashMap<JvmVersion> versions;
         private final long threads;
@@ -487,42 +423,14 @@ public class ClusterStatsNodes implements ToXContent, Writeable<ClusterStatsNode
                 }
                 maxUptime = Math.max(maxUptime, js.getUptime().millis());
                 if (js.getMem() != null) {
-                    heapUsed += js.getMem().getHeapUsed().bytes();
-                    heapMax += js.getMem().getHeapMax().bytes();
+                    heapUsed += js.getMem().getHeapUsed().getBytes();
+                    heapMax += js.getMem().getHeapMax().getBytes();
                 }
             }
             this.threads = threads;
             this.maxUptime = maxUptime;
             this.heapUsed = heapUsed;
             this.heapMax = heapMax;
-        }
-
-        /**
-         * Read from a stream.
-         */
-        private JvmStats(StreamInput in) throws IOException {
-            int size = in.readVInt();
-            this.versions = new ObjectIntHashMap<>(size);
-            for (int i = 0; i < size; i++) {
-                this.versions.addTo(new JvmVersion(in), in.readVInt());
-            }
-            this.threads = in.readVLong();
-            this.maxUptime = in.readVLong();
-            this.heapUsed = in.readVLong();
-            this.heapMax = in.readVLong();
-        }
-
-        @Override
-        public void writeTo(StreamOutput out) throws IOException {
-            out.writeVInt(versions.size());
-            for (ObjectIntCursor<JvmVersion> v : versions) {
-                v.key.writeTo(out);
-                out.writeVInt(v.value);
-            }
-            out.writeVLong(threads);
-            out.writeVLong(maxUptime);
-            out.writeVLong(heapUsed);
-            out.writeVLong(heapMax);
         }
 
         public ObjectIntHashMap<JvmVersion> getVersions() {
@@ -598,7 +506,7 @@ public class ClusterStatsNodes implements ToXContent, Writeable<ClusterStatsNode
         }
     }
 
-    public static class JvmVersion implements Writeable {
+    public static class JvmVersion {
         String version;
         String vmName;
         String vmVersion;
@@ -609,27 +517,6 @@ public class ClusterStatsNodes implements ToXContent, Writeable<ClusterStatsNode
             vmName = jvmInfo.getVmName();
             vmVersion = jvmInfo.getVmVersion();
             vmVendor = jvmInfo.getVmVendor();
-        }
-
-        /**
-         * Read from a stream.
-         */
-        JvmVersion(StreamInput in) throws IOException {
-            version = in.readString();
-            vmName = in.readString();
-            vmVersion = in.readString();
-            vmVendor = in.readString();
-        }
-
-        @Override
-        public void writeTo(StreamOutput out) throws IOException {
-            out.writeString(version);
-            out.writeString(vmName);
-            out.writeString(vmVersion);
-            out.writeString(vmVendor);
-        }
-
-        JvmVersion() {
         }
 
         @Override
@@ -651,4 +538,43 @@ public class ClusterStatsNodes implements ToXContent, Writeable<ClusterStatsNode
             return vmVersion.hashCode();
         }
     }
+
+    static class NetworkTypes implements ToXContent {
+
+        private final Map<String, AtomicInteger> transportTypes;
+        private final Map<String, AtomicInteger> httpTypes;
+
+        private NetworkTypes(final List<NodeInfo> nodeInfos) {
+            final Map<String, AtomicInteger> transportTypes = new HashMap<>();
+            final Map<String, AtomicInteger> httpTypes = new HashMap<>();
+            for (final NodeInfo nodeInfo : nodeInfos) {
+                final Settings settings = nodeInfo.getSettings();
+                final String transportType =
+                    settings.get(NetworkModule.TRANSPORT_TYPE_KEY, NetworkModule.TRANSPORT_DEFAULT_TYPE_SETTING.get(settings));
+                final String httpType =
+                    settings.get(NetworkModule.HTTP_TYPE_KEY, NetworkModule.HTTP_DEFAULT_TYPE_SETTING.get(settings));
+                transportTypes.computeIfAbsent(transportType, k -> new AtomicInteger()).incrementAndGet();
+                httpTypes.computeIfAbsent(httpType, k -> new AtomicInteger()).incrementAndGet();
+            }
+            this.transportTypes = Collections.unmodifiableMap(transportTypes);
+            this.httpTypes = Collections.unmodifiableMap(httpTypes);
+        }
+
+        @Override
+        public XContentBuilder toXContent(final XContentBuilder builder, final Params params) throws IOException {
+            builder.startObject("transport_types");
+            for (final Map.Entry<String, AtomicInteger> entry : transportTypes.entrySet()) {
+                builder.field(entry.getKey(), entry.getValue().get());
+            }
+            builder.endObject();
+            builder.startObject("http_types");
+            for (final Map.Entry<String, AtomicInteger> entry : httpTypes.entrySet()) {
+                builder.field(entry.getKey(), entry.getValue().get());
+            }
+            builder.endObject();
+            return builder;
+        }
+
+    }
+
 }

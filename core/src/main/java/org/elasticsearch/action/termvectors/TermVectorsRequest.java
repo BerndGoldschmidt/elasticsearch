@@ -27,6 +27,7 @@ import org.elasticsearch.action.ValidateActions;
 import org.elasticsearch.action.get.MultiGetRequest;
 import org.elasticsearch.action.support.single.shard.SingleShardRequest;
 import org.elasticsearch.common.Nullable;
+import org.elasticsearch.common.bytes.BytesArray;
 import org.elasticsearch.common.bytes.BytesReference;
 import org.elasticsearch.common.io.stream.StreamInput;
 import org.elasticsearch.common.io.stream.StreamOutput;
@@ -133,8 +134,6 @@ public class TermVectorsRequest extends SingleShardRequest<TermVectorsRequest> i
     private EnumSet<Flag> flagsEnum = EnumSet.of(Flag.Positions, Flag.Offsets, Flag.Payloads,
             Flag.FieldStatistics);
 
-    long startTime;
-
     public TermVectorsRequest() {
     }
 
@@ -159,7 +158,7 @@ public class TermVectorsRequest extends SingleShardRequest<TermVectorsRequest> i
         this.id = other.id();
         this.type = other.type();
         if (this.doc != null) {
-            this.doc = other.doc().copyBytesArray();
+            this.doc = new BytesArray(other.doc().toBytesRef(), true);
         }
         this.flagsEnum = other.getFlags().clone();
         this.preference = other.preference();
@@ -174,7 +173,6 @@ public class TermVectorsRequest extends SingleShardRequest<TermVectorsRequest> i
         this.realtime = other.realtime();
         this.version = other.version();
         this.versionType = VersionType.fromValue(other.versionType().getValue());
-        this.startTime = other.startTime();
         this.filterSettings = other.filterSettings();
     }
 
@@ -182,7 +180,7 @@ public class TermVectorsRequest extends SingleShardRequest<TermVectorsRequest> i
         super(item.index());
         this.id = item.id();
         this.type = item.type();
-        this.selectedFields(item.fields());
+        this.selectedFields(item.storedFields());
         this.routing(item.routing());
         this.parent(item.parent());
     }
@@ -460,10 +458,6 @@ public class TermVectorsRequest extends SingleShardRequest<TermVectorsRequest> i
         }
     }
 
-    public long startTime() {
-        return this.startTime;
-    }
-
     @Override
     public ActionRequestValidationException validate() {
         ActionRequestValidationException validationException = super.validateNonNullIndex();
@@ -601,7 +595,7 @@ public class TermVectorsRequest extends SingleShardRequest<TermVectorsRequest> i
                 } else if (currentFieldName.equals("per_field_analyzer") || currentFieldName.equals("perFieldAnalyzer")) {
                     termVectorsRequest.perFieldAnalyzer(readPerFieldAnalyzer(parser.map()));
                 } else if (currentFieldName.equals("filter")) {
-                    termVectorsRequest.filterSettings(readFilterSettings(parser, termVectorsRequest));
+                    termVectorsRequest.filterSettings(readFilterSettings(parser));
                 } else if ("_index".equals(currentFieldName)) { // the following is important for multi request parsing.
                     termVectorsRequest.index = parser.text();
                 } else if ("_type".equals(currentFieldName)) {
@@ -647,7 +641,7 @@ public class TermVectorsRequest extends SingleShardRequest<TermVectorsRequest> i
         return mapStrStr;
     }
 
-    private static FilterSettings readFilterSettings(XContentParser parser, TermVectorsRequest termVectorsRequest) throws IOException {
+    private static FilterSettings readFilterSettings(XContentParser parser) throws IOException {
         FilterSettings settings = new FilterSettings();
         XContentParser.Token token;
         String currentFieldName = null;

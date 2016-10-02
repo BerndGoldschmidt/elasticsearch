@@ -29,7 +29,6 @@ import org.elasticsearch.common.io.stream.Writeable;
 import org.elasticsearch.common.lucene.Lucene;
 import org.elasticsearch.common.xcontent.ToXContent;
 import org.elasticsearch.common.xcontent.XContentBuilder;
-import org.elasticsearch.index.query.EmptyQueryBuilder;
 import org.elasticsearch.index.query.MatchAllQueryBuilder;
 import org.elasticsearch.index.query.QueryBuilder;
 import org.elasticsearch.search.aggregations.Aggregator;
@@ -57,11 +56,11 @@ public class FiltersAggregator extends BucketsAggregator {
     public static final ParseField OTHER_BUCKET_FIELD = new ParseField("other_bucket");
     public static final ParseField OTHER_BUCKET_KEY_FIELD = new ParseField("other_bucket_key");
 
-    public static class KeyedFilter implements Writeable<KeyedFilter>, ToXContent {
+    public static class KeyedFilter implements Writeable, ToXContent {
         private final String key;
-        private final QueryBuilder<?> filter;
+        private final QueryBuilder filter;
 
-        public KeyedFilter(String key, QueryBuilder<?> filter) {
+        public KeyedFilter(String key, QueryBuilder filter) {
             if (key == null) {
                 throw new IllegalArgumentException("[key] must not be null");
             }
@@ -69,11 +68,7 @@ public class FiltersAggregator extends BucketsAggregator {
                 throw new IllegalArgumentException("[filter] must not be null");
             }
             this.key = key;
-            if (filter instanceof EmptyQueryBuilder) {
-                this.filter = new MatchAllQueryBuilder();
-            } else {
-                this.filter = filter;
-            }
+            this.filter = filter;
         }
 
         /**
@@ -94,7 +89,7 @@ public class FiltersAggregator extends BucketsAggregator {
             return key;
         }
 
-        public QueryBuilder<?> filter() {
+        public QueryBuilder filter() {
             return filter;
         }
 

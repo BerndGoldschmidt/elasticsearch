@@ -209,7 +209,6 @@ public final class SuggestUtils {
         public static final ParseField ACCURACY = new ParseField("accuracy");
    }
 
->>>>>>> refs/remotes/elastic/master
     public static boolean parseDirectSpellcheckerSettings(XContentParser parser, String fieldName,
                 DirectSpellcheckerSettings suggestion, ParseFieldMatcher parseFieldMatcher) throws IOException {
             if (parseFieldMatcher.match(fieldName, Fields.ACCURACY)) {

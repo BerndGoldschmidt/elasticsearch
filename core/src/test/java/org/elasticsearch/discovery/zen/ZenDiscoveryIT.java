@@ -34,14 +34,12 @@ import org.elasticsearch.cluster.service.ClusterService;
 import org.elasticsearch.common.Priority;
 import org.elasticsearch.common.bytes.BytesReference;
 import org.elasticsearch.common.settings.Settings;
-import org.elasticsearch.common.transport.InetSocketTransportAddress;
 import org.elasticsearch.common.transport.LocalTransportAddress;
 import org.elasticsearch.common.xcontent.ToXContent;
 import org.elasticsearch.common.xcontent.XContentBuilder;
 import org.elasticsearch.common.xcontent.XContentFactory;
 import org.elasticsearch.discovery.Discovery;
 import org.elasticsearch.discovery.DiscoveryStats;
-import org.elasticsearch.discovery.zen.elect.ElectMasterService;
 import org.elasticsearch.discovery.zen.fd.FaultDetection;
 import org.elasticsearch.discovery.zen.membership.MembershipAction;
 import org.elasticsearch.discovery.zen.publish.PublishClusterStateAction;
@@ -60,10 +58,8 @@ import org.hamcrest.Matchers;
 import org.junit.Before;
 
 import java.io.IOException;
-import java.net.InetAddress;
 import java.net.UnknownHostException;
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.EnumSet;
 import java.util.List;
 import java.util.concurrent.CountDownLatch;
@@ -77,8 +73,6 @@ import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.is;
 import static org.hamcrest.Matchers.not;
 import static org.hamcrest.Matchers.notNullValue;
-import static org.hamcrest.Matchers.nullValue;
-import static org.hamcrest.Matchers.sameInstance;
 
 @ESIntegTestCase.ClusterScope(scope = ESIntegTestCase.Scope.TEST, numDataNodes = 0, numClientNodes = 0)
 @ESIntegTestCase.SuppressLocalMode
@@ -120,7 +114,7 @@ public class ZenDiscoveryIT extends ESIntegTestCase {
         ClusterHealthResponse clusterHealthResponse = client().admin().cluster().prepareHealth()
                 .setWaitForEvents(Priority.LANGUID)
                 .setWaitForNodes("4")
-                .setWaitForRelocatingShards(0)
+                .setWaitForNoRelocatingShards(true)
                 .get();
         assertThat(clusterHealthResponse.isTimedOut(), is(false));
 
@@ -210,7 +204,7 @@ public class ZenDiscoveryIT extends ESIntegTestCase {
         assert node != null;
 
         DiscoveryNodes.Builder nodes = DiscoveryNodes.builder(state.nodes())
-                .put(new DiscoveryNode("abc", new LocalTransportAddress("abc"), emptyMap(),
+                .add(new DiscoveryNode("abc", new LocalTransportAddress("abc"), emptyMap(),
                         emptySet(), Version.CURRENT)).masterNodeId("abc");
         ClusterState.Builder builder = ClusterState.builder(state);
         builder.nodes(nodes);
@@ -261,8 +255,8 @@ public class ZenDiscoveryIT extends ESIntegTestCase {
             }
 
             @Override
-            public void onFailure(Throwable t) {
-                holder.set((IllegalStateException) t);
+            public void onFailure(Exception e) {
+                holder.set((IllegalStateException) e);
             }
         });
 
@@ -293,44 +287,6 @@ public class ZenDiscoveryIT extends ESIntegTestCase {
         }
     }
 
-    public void testHandleNodeJoin_incompatibleMinVersion() throws UnknownHostException {
-        Settings nodeSettings = Settings.builder()
-                .put("discovery.type", "zen") // <-- To override the local setting if set externally
-                .build();
-        String nodeName = internalCluster().startNode(nodeSettings, Version.CURRENT);
-        ZenDiscovery zenDiscovery = (ZenDiscovery) internalCluster().getInstance(Discovery.class, nodeName);
-        ClusterService clusterService = internalCluster().getInstance(ClusterService.class, nodeName);
-        DiscoveryNode node = new DiscoveryNode("_node_id", new InetSocketTransportAddress(InetAddress.getByName("0.0.0.0"), 0),
-                emptyMap(), emptySet(), previousMajorVersion);
-        final AtomicReference<IllegalStateException> holder = new AtomicReference<>();
-        zenDiscovery.handleJoinRequest(node, clusterService.state(), new MembershipAction.JoinCallback() {
-            @Override
-            public void onSuccess() {
-            }
-
-            @Override
-            public void onFailure(Throwable t) {
-                holder.set((IllegalStateException) t);
-            }
-        });
-
-        assertThat(holder.get(), notNullValue());
-        assertThat(holder.get().getMessage(), equalTo("Can't handle join request from a node with a version [" + previousMajorVersion
-                + "] that is lower than the minimum compatible version [" + Version.CURRENT.minimumCompatibilityVersion() + "]"));
-    }
-
-    public void testJoinElectedMaster_incompatibleMinVersion() {
-        ElectMasterService electMasterService = new ElectMasterService(Settings.EMPTY, Version.CURRENT);
-
-        DiscoveryNode node = new DiscoveryNode("_node_id", new LocalTransportAddress("_id"), emptyMap(),
-                Collections.singleton(DiscoveryNode.Role.MASTER), Version.CURRENT);
-        assertThat(electMasterService.electMaster(Collections.singletonList(node)), sameInstance(node));
-        node = new DiscoveryNode("_node_id", new LocalTransportAddress("_id"), emptyMap(), emptySet(), previousMajorVersion);
-        assertThat("Can't join master because version " + previousMajorVersion
-                + " is lower than the minimum compatable version " + Version.CURRENT + " can support",
-                electMasterService.electMaster(Collections.singletonList(node)), nullValue());
-    }
-
     public void testDiscoveryStats() throws IOException {
         String expectedStatsJsonResponse = "{\n" +
                 "  \"discovery\" : {\n" +
@@ -349,9 +305,9 @@ public class ZenDiscoveryIT extends ESIntegTestCase {
 
         logger.info("--> request node discovery stats");
         NodesStatsResponse statsResponse = client().admin().cluster().prepareNodesStats().clear().setDiscovery(true).get();
-        assertThat(statsResponse.getNodes().length, equalTo(1));
+        assertThat(statsResponse.getNodes().size(), equalTo(1));
 
-        DiscoveryStats stats = statsResponse.getNodes()[0].getDiscoveryStats();
+        DiscoveryStats stats = statsResponse.getNodes().get(0).getDiscoveryStats();
         assertThat(stats.getQueueStats(), notNullValue());
         assertThat(stats.getQueueStats().getTotal(), equalTo(0));
         assertThat(stats.getQueueStats().getCommitted(), equalTo(0));

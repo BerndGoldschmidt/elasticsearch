@@ -42,7 +42,7 @@ public abstract class Aggregator extends BucketCollector implements Releasable {
     /**
      * Parses the aggregation request and creates the appropriate aggregator factory for it.
      *
-     * @see AggregatorBuilder
+     * @see AggregationBuilder
      */
     @FunctionalInterface
     public interface Parser {
@@ -55,7 +55,7 @@ public abstract class Aggregator extends BucketCollector implements Releasable {
          * @return                  The resolved aggregator factory or {@code null} in case the aggregation should be skipped
          * @throws java.io.IOException      When parsing fails
          */
-        AggregatorBuilder<?> parse(String aggregationName, QueryParseContext context) throws IOException;
+        AggregationBuilder parse(String aggregationName, QueryParseContext context) throws IOException;
     }
 
     /**
@@ -102,7 +102,7 @@ public abstract class Aggregator extends BucketCollector implements Releasable {
     public abstract InternalAggregation buildEmptyAggregation();
 
     /** Aggregation mode for sub aggregations. */
-    public enum SubAggCollectionMode implements Writeable<SubAggCollectionMode> {
+    public enum SubAggCollectionMode implements Writeable {
 
         /**
          * Creates buckets and delegates to child aggregators in a single pass over
@@ -139,8 +139,7 @@ public abstract class Aggregator extends BucketCollector implements Releasable {
             throw new ElasticsearchParseException("no [{}] found for value [{}]", KEY.getPreferredName(), value);
         }
 
-        @Override
-        public SubAggCollectionMode readFrom(StreamInput in) throws IOException {
+        public static SubAggCollectionMode readFromStream(StreamInput in) throws IOException {
             int ordinal = in.readVInt();
             if (ordinal < 0 || ordinal >= values().length) {
                 throw new IOException("Unknown SubAggCollectionMode ordinal [" + ordinal + "]");

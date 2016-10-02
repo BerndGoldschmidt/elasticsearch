@@ -22,7 +22,6 @@ package org.elasticsearch.cluster;
 import com.carrotsearch.hppc.cursors.IntObjectCursor;
 import com.carrotsearch.hppc.cursors.ObjectCursor;
 import com.carrotsearch.hppc.cursors.ObjectObjectCursor;
-
 import org.elasticsearch.cluster.block.ClusterBlock;
 import org.elasticsearch.cluster.block.ClusterBlocks;
 import org.elasticsearch.cluster.metadata.IndexMetaData;
@@ -37,11 +36,11 @@ import org.elasticsearch.cluster.routing.RoutingNode;
 import org.elasticsearch.cluster.routing.RoutingNodes;
 import org.elasticsearch.cluster.routing.RoutingTable;
 import org.elasticsearch.cluster.routing.ShardRouting;
-import org.elasticsearch.cluster.routing.allocation.RoutingAllocation;
 import org.elasticsearch.cluster.service.ClusterService;
 import org.elasticsearch.common.Nullable;
 import org.elasticsearch.common.Strings;
 import org.elasticsearch.common.UUIDs;
+import org.elasticsearch.common.bytes.BytesReference;
 import org.elasticsearch.common.collect.ImmutableOpenMap;
 import org.elasticsearch.common.compress.CompressedXContent;
 import org.elasticsearch.common.io.stream.BytesStreamOutput;
@@ -90,7 +89,7 @@ import java.util.Set;
  */
 public class ClusterState implements ToXContent, Diffable<ClusterState> {
 
-    public static final ClusterState PROTO = builder(ClusterName.DEFAULT).build();
+    public static final ClusterState PROTO = builder(ClusterName.CLUSTER_NAME_SETTING.getDefault(Settings.EMPTY)).build();
 
     public static enum ClusterStateStatus {
         UNKNOWN((byte) 0),
@@ -114,7 +113,7 @@ public class ClusterState implements ToXContent, Diffable<ClusterState> {
         String type();
     }
 
-    private final static Map<String, Custom> customPrototypes = new HashMap<>();
+    private static final Map<String, Custom> customPrototypes = new HashMap<>();
 
     /**
      * Register a custom index meta data factory. Make sure to call it from a static block.
@@ -279,6 +278,7 @@ public class ClusterState implements ToXContent, Diffable<ClusterState> {
 
     public String prettyPrint() {
         StringBuilder sb = new StringBuilder();
+        sb.append("cluster uuid: ").append(metaData.clusterUUID()).append("\n");
         sb.append("version: ").append(version).append("\n");
         sb.append("state uuid: ").append(stateUUID).append("\n");
         sb.append("from_diff: ").append(wasReadFromDiff).append("\n");
@@ -290,7 +290,7 @@ public class ClusterState implements ToXContent, Diffable<ClusterState> {
             for (int shard = 0; shard < indexMetaData.getNumberOfShards(); shard++) {
                 sb.append(TAB).append(TAB).append(shard).append(": ");
                 sb.append("p_term [").append(indexMetaData.primaryTerm(shard)).append("], ");
-                sb.append("a_ids ").append(indexMetaData.activeAllocationIds(shard)).append("\n");
+                sb.append("isa_ids ").append(indexMetaData.inSyncAllocationIds(shard)).append("\n");
             }
         }
         sb.append(blocks().prettyPrint());
@@ -499,8 +499,8 @@ public class ClusterState implements ToXContent, Diffable<ClusterState> {
                 }
                 builder.endObject();
 
-                builder.startObject(IndexMetaData.KEY_ACTIVE_ALLOCATIONS);
-                for (IntObjectCursor<Set<String>> cursor : indexMetaData.getActiveAllocationIds()) {
+                builder.startObject(IndexMetaData.KEY_IN_SYNC_ALLOCATIONS);
+                for (IntObjectCursor<Set<String>> cursor : indexMetaData.getInSyncAllocationIds()) {
                     builder.startArray(String.valueOf(cursor.key));
                     for (String allocationId : cursor.value) {
                         builder.value(allocationId);
@@ -623,10 +623,8 @@ public class ClusterState implements ToXContent, Diffable<ClusterState> {
             return this;
         }
 
-        public Builder routingResult(RoutingAllocation.Result routingResult) {
-            this.routingTable = routingResult.routingTable();
-            this.metaData = routingResult.metaData();
-            return this;
+        public DiscoveryNodes nodes() {
+            return nodes;
         }
 
         public Builder routingTable(RoutingTable routingTable) {
@@ -702,7 +700,7 @@ public class ClusterState implements ToXContent, Diffable<ClusterState> {
         public static byte[] toBytes(ClusterState state) throws IOException {
             BytesStreamOutput os = new BytesStreamOutput();
             state.writeTo(os);
-            return os.bytes().toBytes();
+            return BytesReference.toBytes(os.bytes());
         }
 
         /**
@@ -711,6 +709,7 @@ public class ClusterState implements ToXContent, Diffable<ClusterState> {
          */
         public static ClusterState fromBytes(byte[] data, DiscoveryNode localNode) throws IOException {
             return readFrom(StreamInput.wrap(data), localNode);
+
         }
 
         /**
@@ -720,7 +719,6 @@ public class ClusterState implements ToXContent, Diffable<ClusterState> {
         public static ClusterState readFrom(StreamInput in, @Nullable DiscoveryNode localNode) throws IOException {
             return PROTO.readFrom(in, localNode);
         }
-
     }
 
     @Override
@@ -734,7 +732,7 @@ public class ClusterState implements ToXContent, Diffable<ClusterState> {
     }
 
     public ClusterState readFrom(StreamInput in, DiscoveryNode localNode) throws IOException {
-        ClusterName clusterName = ClusterName.readClusterName(in);
+        ClusterName clusterName = new ClusterName(in);
         Builder builder = new Builder(clusterName);
         builder.version = in.readLong();
         builder.uuid = in.readString();
@@ -805,7 +803,7 @@ public class ClusterState implements ToXContent, Diffable<ClusterState> {
         }
 
         public ClusterStateDiff(StreamInput in, ClusterState proto) throws IOException {
-            clusterName = ClusterName.readClusterName(in);
+            clusterName = new ClusterName(in);
             fromUuid = in.readString();
             toUuid = in.readString();
             toVersion = in.readLong();

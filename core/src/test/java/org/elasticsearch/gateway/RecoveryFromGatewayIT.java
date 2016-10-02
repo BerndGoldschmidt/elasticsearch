@@ -51,6 +51,7 @@ import org.elasticsearch.test.store.MockFSIndexStore;
 import java.nio.file.DirectoryStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Arrays;
 import java.util.Collection;
 import java.util.HashMap;
 import java.util.Map;
@@ -63,9 +64,9 @@ import static org.elasticsearch.index.query.QueryBuilders.matchAllQuery;
 import static org.elasticsearch.index.query.QueryBuilders.termQuery;
 import static org.elasticsearch.test.hamcrest.ElasticsearchAssertions.assertAcked;
 import static org.elasticsearch.test.hamcrest.ElasticsearchAssertions.assertHitCount;
-import static org.hamcrest.Matchers.arrayWithSize;
 import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.greaterThan;
+import static org.hamcrest.Matchers.hasSize;
 import static org.hamcrest.Matchers.not;
 import static org.hamcrest.Matchers.notNullValue;
 import static org.hamcrest.Matchers.nullValue;
@@ -75,7 +76,7 @@ public class RecoveryFromGatewayIT extends ESIntegTestCase {
 
     @Override
     protected Collection<Class<? extends Plugin>> nodePlugins() {
-        return pluginList(MockFSIndexStore.TestPlugin.class);
+        return Arrays.asList(MockFSIndexStore.TestPlugin.class);
     }
 
     public void testOneNodeRecoverFromGateway() throws Exception {
@@ -416,7 +417,7 @@ public class RecoveryFromGatewayIT extends ESIntegTestCase {
         logger.info("Running Cluster Health");
         ensureGreen();
         client().admin().indices().prepareForceMerge("test").setMaxNumSegments(100).get(); // just wait for merges
-        client().admin().indices().prepareFlush().setWaitIfOngoing(true).setForce(true).get();
+        client().admin().indices().prepareFlush().setForce(true).get();
 
         boolean useSyncIds = randomBoolean();
         if (useSyncIds == false) {
@@ -565,15 +566,15 @@ public class RecoveryFromGatewayIT extends ESIntegTestCase {
 
         TransportNodesListGatewayStartedShards.NodesGatewayStartedShards response;
         response = internalCluster().getInstance(TransportNodesListGatewayStartedShards.class)
-            .execute(new TransportNodesListGatewayStartedShards.Request(shardId, new String[]{node.getId()}))
+            .execute(new TransportNodesListGatewayStartedShards.Request(shardId, new DiscoveryNode[]{node}))
             .get();
 
-        assertThat(response.getNodes(), arrayWithSize(1));
-        assertThat(response.getNodes()[0].allocationId(), notNullValue());
+        assertThat(response.getNodes(), hasSize(1));
+        assertThat(response.getNodes().get(0).allocationId(), notNullValue());
         if (corrupt) {
-            assertThat(response.getNodes()[0].storeException(), notNullValue());
+            assertThat(response.getNodes().get(0).storeException(), notNullValue());
         } else {
-            assertThat(response.getNodes()[0].storeException(), nullValue());
+            assertThat(response.getNodes().get(0).storeException(), nullValue());
         }
 
         // start another node so cluster consistency checks won't time out due to the lack of state

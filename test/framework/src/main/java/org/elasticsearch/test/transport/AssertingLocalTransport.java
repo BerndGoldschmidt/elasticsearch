@@ -24,16 +24,19 @@ import org.elasticsearch.cluster.node.DiscoveryNode;
 import org.elasticsearch.common.inject.Inject;
 import org.elasticsearch.common.io.stream.NamedWriteableRegistry;
 import org.elasticsearch.common.network.NetworkModule;
+import org.elasticsearch.common.network.NetworkService;
 import org.elasticsearch.common.settings.Setting;
 import org.elasticsearch.common.settings.Setting.Property;
 import org.elasticsearch.common.settings.Settings;
-import org.elasticsearch.common.settings.SettingsModule;
+import org.elasticsearch.common.util.BigArrays;
 import org.elasticsearch.indices.breaker.CircuitBreakerService;
+import org.elasticsearch.plugins.NetworkPlugin;
 import org.elasticsearch.plugins.Plugin;
 import org.elasticsearch.test.ESIntegTestCase;
 import org.elasticsearch.test.VersionUtils;
 import org.elasticsearch.test.hamcrest.ElasticsearchAssertions;
 import org.elasticsearch.threadpool.ThreadPool;
+import org.elasticsearch.transport.Transport;
 import org.elasticsearch.transport.TransportException;
 import org.elasticsearch.transport.TransportRequest;
 import org.elasticsearch.transport.TransportRequestOptions;
@@ -42,30 +45,31 @@ import org.elasticsearch.transport.TransportResponseHandler;
 import org.elasticsearch.transport.local.LocalTransport;
 
 import java.io.IOException;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.List;
+import java.util.Map;
 import java.util.Random;
+import java.util.function.Supplier;
 
 public class AssertingLocalTransport extends LocalTransport {
 
-    public static class TestPlugin extends Plugin {
+    public static final String ASSERTING_TRANSPORT_NAME = "asserting_local";
+
+    public static class TestPlugin extends Plugin implements NetworkPlugin {
+
         @Override
-        public String name() {
-            return "asserting-local-transport";
-        }
-        @Override
-        public String description() {
-            return "an asserting transport for testing";
-        }
-        public void onModule(NetworkModule module) {
-            module.registerTransport("mock", AssertingLocalTransport.class);
-        }
-        @Override
-        public Settings additionalSettings() {
-            return Settings.builder().put(NetworkModule.TRANSPORT_TYPE_KEY, "mock").build();
+        public List<Setting<?>> getSettings() {
+            return Arrays.asList(ASSERTING_TRANSPORT_MIN_VERSION_KEY, ASSERTING_TRANSPORT_MAX_VERSION_KEY);
         }
 
-        public void onModule(SettingsModule module) {
-            module.registerSetting(ASSERTING_TRANSPORT_MIN_VERSION_KEY);
-            module.registerSetting(ASSERTING_TRANSPORT_MAX_VERSION_KEY);
+        @Override
+        public Map<String, Supplier<Transport>> getTransports(Settings settings, ThreadPool threadPool, BigArrays bigArrays,
+                                                              CircuitBreakerService circuitBreakerService,
+                                                              NamedWriteableRegistry namedWriteableRegistry,
+                                                              NetworkService networkService) {
+            return Collections.singletonMap(ASSERTING_TRANSPORT_NAME,
+                () -> new AssertingLocalTransport(settings, circuitBreakerService, threadPool, namedWriteableRegistry));
         }
     }
 
@@ -81,8 +85,8 @@ public class AssertingLocalTransport extends LocalTransport {
 
     @Inject
     public AssertingLocalTransport(Settings settings, CircuitBreakerService circuitBreakerService, ThreadPool threadPool,
-                                   Version version, NamedWriteableRegistry namedWriteableRegistry) {
-        super(settings, threadPool, version, namedWriteableRegistry, circuitBreakerService);
+                                   NamedWriteableRegistry namedWriteableRegistry) {
+        super(settings, threadPool, namedWriteableRegistry, circuitBreakerService);
         final long seed = ESIntegTestCase.INDEX_TEST_SEED_SETTING.get(settings);
         random = new Random(seed);
         minVersion = ASSERTING_TRANSPORT_MIN_VERSION_KEY.get(settings);

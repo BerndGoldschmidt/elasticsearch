@@ -19,6 +19,8 @@
 
 package org.elasticsearch.index.query;
 
+import org.apache.lucene.document.LatLonPoint;
+import org.apache.lucene.geo.Polygon;
 import org.apache.lucene.search.MatchNoDocsQuery;
 import org.apache.lucene.search.Query;
 import org.apache.lucene.spatial.geopoint.document.GeoPointField;
@@ -35,27 +37,29 @@ import org.elasticsearch.common.xcontent.XContentBuilder;
 import org.elasticsearch.common.xcontent.XContentParser;
 import org.elasticsearch.common.xcontent.XContentParser.Token;
 import org.elasticsearch.index.fielddata.IndexGeoPointFieldData;
+import org.elasticsearch.index.mapper.BaseGeoPointFieldMapper;
+import org.elasticsearch.index.mapper.LatLonPointFieldMapper;
 import org.elasticsearch.index.mapper.MappedFieldType;
-import org.elasticsearch.index.mapper.geo.BaseGeoPointFieldMapper;
 import org.elasticsearch.index.search.geo.GeoPolygonQuery;
 
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
+import java.util.Optional;
 
 public class GeoPolygonQueryBuilder extends AbstractQueryBuilder<GeoPolygonQueryBuilder> {
-
     public static final String NAME = "geo_polygon";
-    public static final ParseField QUERY_NAME_FIELD = new ParseField(NAME);
 
     /**
      * The default value for ignore_unmapped.
      */
     public static final boolean DEFAULT_IGNORE_UNMAPPED = false;
 
-    private static final ParseField COERCE_FIELD = new ParseField("coerce", "normalize");
-    private static final ParseField IGNORE_MALFORMED_FIELD = new ParseField("ignore_malformed");
+    private static final ParseField COERCE_FIELD = new ParseField("coerce", "normalize")
+            .withAllDeprecated("use validation_method instead");
+    private static final ParseField IGNORE_MALFORMED_FIELD = new ParseField("ignore_malformed")
+            .withAllDeprecated("use validation_method instead");
     private static final ParseField VALIDATION_METHOD = new ParseField("validation_method");
     private static final ParseField POINTS_FIELD = new ParseField("points");
     private static final ParseField IGNORE_UNMAPPED_FIELD = new ParseField("ignore_unmapped");
@@ -209,9 +213,13 @@ public class GeoPolygonQueryBuilder extends AbstractQueryBuilder<GeoPolygonQuery
         double[] lons = new double[shellSize];
         GeoPoint p;
         for (int i=0; i<shellSize; ++i) {
-            p = new GeoPoint(shell.get(i));
+            p = shell.get(i);
             lats[i] = p.lat();
             lons[i] = p.lon();
+        }
+
+        if (indexVersionCreated.onOrAfter(LatLonPointFieldMapper.LAT_LON_FIELD_VERSION)) {
+            return LatLonPoint.newPolygonQuery(fieldType.name(), new Polygon(lats, lons));
         }
         // if index created V_2_2 use (soon to be legacy) numeric encoding postings format
         // if index created V_2_3 > use prefix encoded postings format
@@ -232,16 +240,14 @@ public class GeoPolygonQueryBuilder extends AbstractQueryBuilder<GeoPolygonQuery
         builder.endArray();
         builder.endObject();
 
-        builder.field(COERCE_FIELD.getPreferredName(), GeoValidationMethod.isCoerce(validationMethod));
-        builder.field(IGNORE_MALFORMED_FIELD.getPreferredName(),
-                GeoValidationMethod.isIgnoreMalformed(validationMethod));
+        builder.field(VALIDATION_METHOD.getPreferredName(), validationMethod);
         builder.field(IGNORE_UNMAPPED_FIELD.getPreferredName(), ignoreUnmapped);
 
         printBoostAndQueryName(builder);
         builder.endObject();
     }
 
-    public static GeoPolygonQueryBuilder fromXContent(QueryParseContext parseContext) throws IOException {
+    public static Optional<GeoPolygonQueryBuilder> fromXContent(QueryParseContext parseContext) throws IOException {
         XContentParser parser = parseContext.parser();
 
         String fieldName = null;
@@ -322,7 +328,7 @@ public class GeoPolygonQueryBuilder extends AbstractQueryBuilder<GeoPolygonQuery
             builder.boost(boost);
         }
         builder.ignoreUnmapped(ignoreUnmapped);
-        return builder;
+        return Optional.of(builder);
     }
 
     @Override

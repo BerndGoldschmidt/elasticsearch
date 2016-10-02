@@ -38,7 +38,6 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.ExecutionException;
 
-import static org.elasticsearch.client.Requests.indexAliasesRequest;
 import static org.elasticsearch.client.Requests.indexRequest;
 import static org.elasticsearch.client.Requests.refreshRequest;
 import static org.elasticsearch.cluster.metadata.IndexMetaData.SETTING_NUMBER_OF_REPLICAS;
@@ -108,8 +107,9 @@ public class MoreLikeThisIT extends ESIntegTestCase {
                         .startObject("text").field("type", "text").endObject()
                         .endObject().endObject().endObject()));
         logger.info("Creating aliases alias release");
-        client().admin().indices().aliases(indexAliasesRequest().addAlias("release", termQuery("text", "release"), "test")).actionGet();
-        client().admin().indices().aliases(indexAliasesRequest().addAlias("beta", termQuery("text", "beta"), "test")).actionGet();
+        client().admin().indices().prepareAliases()
+            .addAlias("test", "release", termQuery("text", "release"))
+            .addAlias("test", "beta", termQuery("text", "beta")).get();
 
         logger.info("Running Cluster Health");
         assertThat(ensureGreen(), equalTo(ClusterHealthStatus.GREEN));
@@ -155,8 +155,8 @@ public class MoreLikeThisIT extends ESIntegTestCase {
                 .startObject("properties")
                 .endObject()
                 .endObject().endObject().string();
-        client().admin().indices().prepareCreate(indexName).addMapping(typeName, mapping).execute().actionGet();
-        client().admin().indices().aliases(indexAliasesRequest().addAlias(aliasName, indexName)).actionGet();
+        client().admin().indices().prepareCreate(indexName).addMapping(typeName, mapping).get();
+        client().admin().indices().prepareAliases().addAlias(indexName, aliasName).get();
 
         assertThat(ensureGreen(), equalTo(ClusterHealthStatus.GREEN));
 
@@ -179,7 +179,7 @@ public class MoreLikeThisIT extends ESIntegTestCase {
                 .endObject().endObject().string();
         client().admin().indices().prepareCreate("foo").addMapping("bar", mapping).execute().actionGet();
         client().prepareIndex("foo", "bar", "1")
-                .setSource(jsonBuilder().startObject().startObject("foo").field("bar", "boz").endObject())
+                .setSource(jsonBuilder().startObject().startObject("foo").field("bar", "boz").endObject().endObject())
                 .execute().actionGet();
         client().admin().indices().prepareRefresh("foo").execute().actionGet();
         assertThat(ensureGreen(), equalTo(ClusterHealthStatus.GREEN));
@@ -204,7 +204,7 @@ public class MoreLikeThisIT extends ESIntegTestCase {
         ensureGreen();
 
         client().prepareIndex("foo", "bar", "1")
-                .setSource(jsonBuilder().startObject().startObject("foo").field("bar", "boz").endObject())
+                .setSource(jsonBuilder().startObject().startObject("foo").field("bar", "boz").endObject().endObject())
                 .setRouting("2")
                 .execute().actionGet();
         client().admin().indices().prepareRefresh("foo").execute().actionGet();
@@ -227,7 +227,7 @@ public class MoreLikeThisIT extends ESIntegTestCase {
         ensureGreen();
 
         client().prepareIndex("foo", "bar", "1")
-                .setSource(jsonBuilder().startObject().startObject("foo").field("bar", "boz").endObject())
+                .setSource(jsonBuilder().startObject().startObject("foo").field("bar", "boz").endObject().endObject())
                 .setRouting("4000")
                 .execute().actionGet();
         client().admin().indices().prepareRefresh("foo").execute().actionGet();
@@ -514,17 +514,6 @@ public class MoreLikeThisIT extends ESIntegTestCase {
         logger.info("Checking with an empty document ...");
         XContentBuilder emptyDoc = jsonBuilder().startObject().endObject();
         mltQuery = moreLikeThisQuery(null, new Item[] {new Item("test", "type1", emptyDoc)})
-                .minTermFreq(0)
-                .minDocFreq(0)
-                .minimumShouldMatch("0%");
-        response = client().prepareSearch("test").setTypes("type1")
-                .setQuery(mltQuery).get();
-        assertSearchResponse(response);
-        assertHitCount(response, 0);
-
-        logger.info("Checking when document is malformed ...");
-        XContentBuilder malformedDoc = jsonBuilder().startObject();
-        mltQuery = moreLikeThisQuery(null, new Item[] {new Item("test", "type1", malformedDoc)})
                 .minTermFreq(0)
                 .minDocFreq(0)
                 .minimumShouldMatch("0%");

@@ -78,7 +78,7 @@ public class BulkItemResponse implements Streamable, StatusToXContent {
     /**
      * Represents a failure.
      */
-    public static class Failure implements Writeable<Failure>, ToXContent {
+    public static class Failure implements Writeable, ToXContent {
         static final String INDEX_FIELD = "index";
         static final String TYPE_FIELD = "type";
         static final String ID_FIELD = "id";
@@ -91,12 +91,12 @@ public class BulkItemResponse implements Streamable, StatusToXContent {
         private final Throwable cause;
         private final RestStatus status;
 
-        public Failure(String index, String type, String id, Throwable t) {
+        public Failure(String index, String type, String id, Throwable cause) {
             this.index = index;
             this.type = type;
             this.id = id;
-            this.cause = t;
-            this.status = ExceptionsHelper.status(t);
+            this.cause = cause;
+            this.status = ExceptionsHelper.status(cause);
         }
 
         /**
@@ -106,7 +106,7 @@ public class BulkItemResponse implements Streamable, StatusToXContent {
             index = in.readString();
             type = in.readString();
             id = in.readOptionalString();
-            cause = in.readThrowable();
+            cause = in.readException();
             status = ExceptionsHelper.status(cause);
         }
 
@@ -115,7 +115,7 @@ public class BulkItemResponse implements Streamable, StatusToXContent {
             out.writeString(getIndex());
             out.writeString(getType());
             out.writeOptionalString(getId());
-            out.writeThrowable(getCause());
+            out.writeException(getCause());
         }
 
 

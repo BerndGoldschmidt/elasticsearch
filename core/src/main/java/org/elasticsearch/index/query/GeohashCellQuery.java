@@ -21,12 +21,12 @@ package org.elasticsearch.index.query;
 
 import org.apache.lucene.search.MatchNoDocsQuery;
 import org.apache.lucene.search.Query;
-import org.elasticsearch.common.geo.GeoHashUtils;
 import org.elasticsearch.ElasticsearchParseException;
 import org.elasticsearch.common.Nullable;
 import org.elasticsearch.common.ParseField;
 import org.elasticsearch.common.ParsingException;
 import org.elasticsearch.common.Strings;
+import org.elasticsearch.common.geo.GeoHashUtils;
 import org.elasticsearch.common.geo.GeoPoint;
 import org.elasticsearch.common.geo.GeoUtils;
 import org.elasticsearch.common.io.stream.StreamInput;
@@ -35,13 +35,15 @@ import org.elasticsearch.common.unit.DistanceUnit;
 import org.elasticsearch.common.xcontent.XContentBuilder;
 import org.elasticsearch.common.xcontent.XContentParser;
 import org.elasticsearch.common.xcontent.XContentParser.Token;
+import org.elasticsearch.index.mapper.BaseGeoPointFieldMapper;
+import org.elasticsearch.index.mapper.LatLonPointFieldMapper;
 import org.elasticsearch.index.mapper.MappedFieldType;
-import org.elasticsearch.index.mapper.geo.BaseGeoPointFieldMapper;
 
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
+import java.util.Optional;
 
 /**
  * A geohash cell filter that filters {@link GeoPoint}s by their geohashes. Basically the a
@@ -59,9 +61,7 @@ import java.util.Objects;
  * </pre>
  */
 public class GeohashCellQuery {
-
     public static final String NAME = "geohash_cell";
-    public static final ParseField QUERY_NAME_FIELD = new ParseField(NAME);
 
     public static final boolean DEFAULT_NEIGHBORS = false;
 
@@ -84,7 +84,7 @@ public class GeohashCellQuery {
      * @param geohashes   optional array of additional geohashes
      * @return a new GeoBoundinboxfilter
      */
-    public static Query create(QueryShardContext context, BaseGeoPointFieldMapper.GeoPointFieldType fieldType,
+    public static Query create(QueryShardContext context, BaseGeoPointFieldMapper.LegacyGeoPointFieldType fieldType,
                                String geohash, @Nullable List<CharSequence> geohashes) {
         MappedFieldType geoHashMapper = fieldType.geoHashFieldType();
         if (geoHashMapper == null) {
@@ -242,11 +242,14 @@ public class GeohashCellQuery {
                 }
             }
 
-            if (!(fieldType instanceof BaseGeoPointFieldMapper.GeoPointFieldType)) {
+            if (fieldType instanceof LatLonPointFieldMapper.LatLonPointFieldType) {
+                throw new QueryShardException(context, "failed to parse [{}] query. "
+                    + "geo_point field no longer supports geohash_cell queries", NAME);
+            } else if (!(fieldType instanceof BaseGeoPointFieldMapper.LegacyGeoPointFieldType)) {
                 throw new QueryShardException(context, "failed to parse [{}] query. field [{}] is not a geo_point field", NAME, fieldName);
             }
 
-            BaseGeoPointFieldMapper.GeoPointFieldType geoFieldType = ((BaseGeoPointFieldMapper.GeoPointFieldType) fieldType);
+            BaseGeoPointFieldMapper.LegacyGeoPointFieldType geoFieldType = ((BaseGeoPointFieldMapper.LegacyGeoPointFieldType) fieldType);
             if (!geoFieldType.isGeoHashPrefixEnabled()) {
                 throw new QueryShardException(context, "failed to parse [{}] query. [geohash_prefix] is not enabled for field [{}]", NAME,
                         fieldName);
@@ -280,7 +283,7 @@ public class GeohashCellQuery {
             builder.endObject();
         }
 
-        public static Builder fromXContent(QueryParseContext parseContext) throws IOException {
+        public static Optional<Builder> fromXContent(QueryParseContext parseContext) throws IOException {
             XContentParser parser = parseContext.parser();
 
             String fieldName = null;
@@ -362,7 +365,7 @@ public class GeohashCellQuery {
                 builder.boost(boost);
             }
             builder.ignoreUnmapped(ignoreUnmapped);
-            return builder;
+            return Optional.of(builder);
         }
 
         @Override

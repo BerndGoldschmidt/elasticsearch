@@ -25,16 +25,20 @@ import org.apache.lucene.search.MatchNoDocsQuery;
 import org.apache.lucene.search.Query;
 import org.apache.lucene.search.join.ScoreMode;
 import org.apache.lucene.search.join.ToParentBlockJoinQuery;
+import org.elasticsearch.Version;
 import org.elasticsearch.action.admin.indices.mapping.put.PutMappingRequest;
 import org.elasticsearch.common.compress.CompressedXContent;
+import org.elasticsearch.index.mapper.LatLonPointFieldMapper;
 import org.elasticsearch.index.mapper.MapperService;
-import org.elasticsearch.index.query.support.InnerHitBuilder;
-import org.elasticsearch.search.fetch.innerhits.InnerHitsContext;
+import org.elasticsearch.search.fetch.subphase.InnerHitsContext;
 import org.elasticsearch.search.internal.SearchContext;
 import org.elasticsearch.search.sort.FieldSortBuilder;
 import org.elasticsearch.search.sort.SortOrder;
+import org.elasticsearch.test.AbstractQueryTestCase;
 
 import java.io.IOException;
+import java.util.HashMap;
+import java.util.Map;
 
 import static org.hamcrest.CoreMatchers.containsString;
 import static org.hamcrest.CoreMatchers.equalTo;
@@ -43,10 +47,13 @@ import static org.hamcrest.CoreMatchers.notNullValue;
 
 public class NestedQueryBuilderTests extends AbstractQueryTestCase<NestedQueryBuilder> {
 
+    boolean requiresRewrite = false;
+
     @Override
-    public void setUp() throws Exception {
-        super.setUp();
-        MapperService mapperService = createShardContext().getMapperService();
+    protected void initializeAdditionalMappings(MapperService mapperService) throws IOException {
+        String geoFieldMapping = (mapperService.getIndexSettings().getIndexVersionCreated()
+            .before(LatLonPointFieldMapper.LAT_LON_FIELD_VERSION)) ?
+            LEGACY_GEO_POINT_FIELD_MAPPING : "type=geo_point";
         mapperService.merge("nested_doc", new CompressedXContent(PutMappingRequest.buildFromSimplifiedDef("nested_doc",
                 STRING_FIELD_NAME, "type=text",
                 INT_FIELD_NAME, "type=integer",
@@ -54,7 +61,7 @@ public class NestedQueryBuilderTests extends AbstractQueryTestCase<NestedQueryBu
                 BOOLEAN_FIELD_NAME, "type=boolean",
                 DATE_FIELD_NAME, "type=date",
                 OBJECT_FIELD_NAME, "type=object",
-                GEO_POINT_FIELD_NAME, GEO_POINT_FIELD_MAPPING,
+                GEO_POINT_FIELD_NAME, geoFieldMapping,
                 "nested1", "type=nested"
         ).string()), MapperService.MergeReason.MAPPING_UPDATE, false);
     }
@@ -64,13 +71,18 @@ public class NestedQueryBuilderTests extends AbstractQueryTestCase<NestedQueryBu
      */
     @Override
     protected NestedQueryBuilder doCreateTestQueryBuilder() {
-        NestedQueryBuilder nqb = new NestedQueryBuilder("nested1", RandomQueryBuilder.createQuery(random()),
+        QueryBuilder innerQueryBuilder = RandomQueryBuilder.createQuery(random());
+        if (randomBoolean()) {
+            requiresRewrite = true;
+            innerQueryBuilder = new WrapperQueryBuilder(innerQueryBuilder.toString());
+        }
+        NestedQueryBuilder nqb = new NestedQueryBuilder("nested1", innerQueryBuilder,
                 RandomPicks.randomFrom(random(), ScoreMode.values()));
-        if (SearchContext.current() != null) {
+        if (randomBoolean()) {
             nqb.innerHit(new InnerHitBuilder()
                     .setName(randomAsciiOfLengthBetween(1, 10))
                     .setSize(randomIntBetween(0, 100))
-                    .addSort(new FieldSortBuilder(STRING_FIELD_NAME).order(SortOrder.ASC)));
+                    .addSort(new FieldSortBuilder(INT_FIELD_NAME).order(SortOrder.ASC)));
         }
         nqb.ignoreUnmapped(randomBoolean());
         return nqb;
@@ -79,31 +91,33 @@ public class NestedQueryBuilderTests extends AbstractQueryTestCase<NestedQueryBu
     @Override
     protected void doAssertLuceneQuery(NestedQueryBuilder queryBuilder, Query query, QueryShardContext context) throws IOException {
         QueryBuilder innerQueryBuilder = queryBuilder.query();
-        if (innerQueryBuilder instanceof EmptyQueryBuilder) {
-            assertNull(query);
-        } else {
-            assertThat(query, instanceOf(ToParentBlockJoinQuery.class));
-            ToParentBlockJoinQuery parentBlockJoinQuery = (ToParentBlockJoinQuery) query;
-            //TODO how to assert this?
-        }
+        assertThat(query, instanceOf(ToParentBlockJoinQuery.class));
+        ToParentBlockJoinQuery parentBlockJoinQuery = (ToParentBlockJoinQuery) query;
+        // TODO how to assert this?
         if (queryBuilder.innerHit() != null) {
-            assertNotNull(SearchContext.current());
-            if (query != null) {
-                assertNotNull(SearchContext.current().innerHits());
-                assertEquals(1, SearchContext.current().innerHits().getInnerHits().size());
-                assertTrue(SearchContext.current().innerHits().getInnerHits().containsKey("inner_hits_name"));
-                InnerHitsContext.BaseInnerHits innerHits = SearchContext.current().innerHits().getInnerHits().get("inner_hits_name");
-                assertEquals(innerHits.size(), 100);
-                assertEquals(innerHits.sort().getSort().length, 1);
-                assertEquals(innerHits.sort().getSort()[0].getField(), STRING_FIELD_NAME);
-            } else {
-                assertThat(SearchContext.current().innerHits().getInnerHits().size(), equalTo(0));
+            // have to rewrite again because the provided queryBuilder hasn't been rewritten (directly returned from
+            // doCreateTestQueryBuilder)
+            queryBuilder = (NestedQueryBuilder) queryBuilder.rewrite(context);
+
+            SearchContext searchContext = SearchContext.current();
+            assertNotNull(searchContext);
+            Map<String, InnerHitBuilder> innerHitBuilders = new HashMap<>();
+            InnerHitBuilder.extractInnerHits(queryBuilder, innerHitBuilders);
+            for (InnerHitBuilder builder : innerHitBuilders.values()) {
+                builder.build(searchContext, searchContext.innerHits());
             }
+            assertNotNull(searchContext.innerHits());
+            assertEquals(1, searchContext.innerHits().getInnerHits().size());
+            assertTrue(searchContext.innerHits().getInnerHits().containsKey(queryBuilder.innerHit().getName()));
+            InnerHitsContext.BaseInnerHits innerHits = searchContext.innerHits().getInnerHits().get(queryBuilder.innerHit().getName());
+            assertEquals(innerHits.size(), queryBuilder.innerHit().getSize());
+            assertEquals(innerHits.sort().sort.getSort().length, 1);
+            assertEquals(innerHits.sort().sort.getSort()[0].getField(), INT_FIELD_NAME);
         }
     }
 
     public void testValidate() {
-        QueryBuilder<?> innerQuery = RandomQueryBuilder.createQuery(random());
+        QueryBuilder innerQuery = RandomQueryBuilder.createQuery(random());
         IllegalArgumentException e =
                 expectThrows(IllegalArgumentException.class, () -> QueryBuilders.nestedQuery(null, innerQuery, ScoreMode.Avg));
         assertThat(e.getMessage(), equalTo("[nested] requires 'path' field"));
@@ -161,6 +175,17 @@ public class NestedQueryBuilderTests extends AbstractQueryTestCase<NestedQueryBu
         checkGeneratedJson(json, parsed);
 
         assertEquals(json, ScoreMode.Avg, parsed.scoreMode());
+    }
+
+    @Override
+    public void testMustRewrite() throws IOException {
+        try {
+            super.testMustRewrite();
+        } catch (UnsupportedOperationException e) {
+            if (requiresRewrite == false) {
+                throw e;
+            }
+        }
     }
 
     public void testIgnoreUnmapped() throws IOException {

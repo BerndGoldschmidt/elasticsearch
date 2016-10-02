@@ -19,6 +19,8 @@
 
 package org.elasticsearch.index.query;
 
+import org.apache.lucene.document.LatLonPoint;
+import org.apache.lucene.geo.Rectangle;
 import org.apache.lucene.search.MatchNoDocsQuery;
 import org.apache.lucene.search.Query;
 import org.apache.lucene.spatial.geopoint.document.GeoPointField;
@@ -28,6 +30,7 @@ import org.elasticsearch.Version;
 import org.elasticsearch.common.Numbers;
 import org.elasticsearch.common.ParseField;
 import org.elasticsearch.common.ParsingException;
+import org.elasticsearch.common.geo.GeoHashUtils;
 import org.elasticsearch.common.geo.GeoPoint;
 import org.elasticsearch.common.geo.GeoUtils;
 import org.elasticsearch.common.io.stream.StreamInput;
@@ -35,14 +38,16 @@ import org.elasticsearch.common.io.stream.StreamOutput;
 import org.elasticsearch.common.xcontent.XContentBuilder;
 import org.elasticsearch.common.xcontent.XContentParser;
 import org.elasticsearch.index.fielddata.IndexGeoPointFieldData;
+import org.elasticsearch.index.mapper.BaseGeoPointFieldMapper;
+import org.elasticsearch.index.mapper.BaseGeoPointFieldMapper.LegacyGeoPointFieldType;
+import org.elasticsearch.index.mapper.LatLonPointFieldMapper;
 import org.elasticsearch.index.mapper.MappedFieldType;
-import org.elasticsearch.index.mapper.geo.BaseGeoPointFieldMapper;
-import org.elasticsearch.index.mapper.geo.GeoPointFieldMapperLegacy;
-import org.elasticsearch.index.search.geo.InMemoryGeoBoundingBoxQuery;
-import org.elasticsearch.index.search.geo.IndexedGeoBoundingBoxQuery;
+import org.elasticsearch.index.search.geo.LegacyInMemoryGeoBoundingBoxQuery;
+import org.elasticsearch.index.search.geo.LegacyIndexedGeoBoundingBoxQuery;
 
 import java.io.IOException;
 import java.util.Objects;
+import java.util.Optional;
 
 /**
  * Creates a Lucene query that will filter for all documents that lie within the specified
@@ -52,7 +57,6 @@ import java.util.Objects;
  * enabled.
  * */
 public class GeoBoundingBoxQueryBuilder extends AbstractQueryBuilder<GeoBoundingBoxQueryBuilder> {
-    /** Name of the query. */
     public static final String NAME = "geo_bounding_box";
     public static final ParseField QUERY_NAME_FIELD = new ParseField(NAME, "geo_bbox");
 
@@ -64,10 +68,12 @@ public class GeoBoundingBoxQueryBuilder extends AbstractQueryBuilder<GeoBounding
      */
     public static final boolean DEFAULT_IGNORE_UNMAPPED = false;
 
-    private static final ParseField IGNORE_MALFORMED_FIELD = new ParseField("ignore_malformed");
     private static final ParseField TYPE_FIELD = new ParseField("type");
     private static final ParseField VALIDATION_METHOD_FIELD = new ParseField("validation_method");
-    private static final ParseField COERCE_FIELD = new ParseField("coerce", "normalize");
+    private static final ParseField COERCE_FIELD =new ParseField("coerce", "normalize")
+            .withAllDeprecated("use field validation_method instead");
+    private static final ParseField IGNORE_MALFORMED_FIELD = new ParseField("ignore_malformed")
+            .withAllDeprecated("use field validation_method instead");
     private static final ParseField FIELD_FIELD = new ParseField("field");
     private static final ParseField TOP_FIELD = new ParseField("top");
     private static final ParseField BOTTOM_FIELD = new ParseField("bottom");
@@ -152,7 +158,13 @@ public class GeoBoundingBoxQueryBuilder extends AbstractQueryBuilder<GeoBounding
             if (top < bottom) {
                 throw new IllegalArgumentException("top is below bottom corner: " +
                             top + " vs. " + bottom);
-                }
+            } else if (top == bottom) {
+                throw new IllegalArgumentException("top cannot be the same as bottom: " +
+                    top + " == " + bottom);
+            } else if (left == right) {
+                throw new IllegalArgumentException("left cannot be the same as right: " +
+                    left + " == " + right);
+            }
 
                 // we do not check longitudes as the query generation code can deal with flipped left/right values
         }
@@ -169,6 +181,16 @@ public class GeoBoundingBoxQueryBuilder extends AbstractQueryBuilder<GeoBounding
      * */
     public GeoBoundingBoxQueryBuilder setCorners(GeoPoint topLeft, GeoPoint bottomRight) {
         return setCorners(topLeft.getLat(), topLeft.getLon(), bottomRight.getLat(), bottomRight.getLon());
+    }
+
+    /**
+     * Adds points from a single geohash.
+     * @param geohash The geohash for computing the bounding box.
+     */
+    public GeoBoundingBoxQueryBuilder setCorners(final String geohash) {
+        // get the bounding box of the geohash and set topLeft and bottomRight
+        Rectangle ghBBox = GeoHashUtils.bbox(geohash);
+        return setCorners(new GeoPoint(ghBBox.maxLat, ghBBox.minLon), new GeoPoint(ghBBox.minLat, ghBBox.maxLon));
     }
 
     /**
@@ -339,7 +361,10 @@ public class GeoBoundingBoxQueryBuilder extends AbstractQueryBuilder<GeoBounding
             }
         }
 
-        if (indexVersionCreated.onOrAfter(Version.V_2_2_0)) {
+        if (indexVersionCreated.onOrAfter(LatLonPointFieldMapper.LAT_LON_FIELD_VERSION)) {
+            return LatLonPoint.newBoxQuery(fieldType.name(), luceneBottomRight.getLat(), luceneTopLeft.getLat(),
+                luceneTopLeft.getLon(), luceneBottomRight.getLon());
+        } else if (indexVersionCreated.onOrAfter(Version.V_2_2_0)) {
             // if index created V_2_2 use (soon to be legacy) numeric encoding postings format
             // if index created V_2_3 > use prefix encoded postings format
             final GeoPointField.TermEncoding encoding = (indexVersionCreated.before(Version.V_2_3_0)) ?
@@ -351,12 +376,12 @@ public class GeoBoundingBoxQueryBuilder extends AbstractQueryBuilder<GeoBounding
         Query query;
         switch(type) {
             case INDEXED:
-                GeoPointFieldMapperLegacy.GeoPointFieldType geoFieldType = ((GeoPointFieldMapperLegacy.GeoPointFieldType) fieldType);
-                query = IndexedGeoBoundingBoxQuery.create(luceneTopLeft, luceneBottomRight, geoFieldType);
+                LegacyGeoPointFieldType geoFieldType = ((LegacyGeoPointFieldType) fieldType);
+                query = LegacyIndexedGeoBoundingBoxQuery.create(luceneTopLeft, luceneBottomRight, geoFieldType);
                 break;
             case MEMORY:
                 IndexGeoPointFieldData indexFieldData = context.getForField(fieldType);
-                query = new InMemoryGeoBoundingBoxQuery(luceneTopLeft, luceneBottomRight, indexFieldData);
+                query = new LegacyInMemoryGeoBoundingBoxQuery(luceneTopLeft, luceneBottomRight, indexFieldData);
                 break;
             default:
                 // Someone extended the type enum w/o adjusting this switch statement.
@@ -383,7 +408,7 @@ public class GeoBoundingBoxQueryBuilder extends AbstractQueryBuilder<GeoBounding
         builder.endObject();
     }
 
-    public static GeoBoundingBoxQueryBuilder fromXContent(QueryParseContext parseContext) throws IOException {
+    public static Optional<GeoBoundingBoxQueryBuilder> fromXContent(QueryParseContext parseContext) throws IOException {
         XContentParser parser = parseContext.parser();
 
         String fieldName = null;
@@ -494,7 +519,7 @@ public class GeoBoundingBoxQueryBuilder extends AbstractQueryBuilder<GeoBounding
         } else {
             builder.setValidationMethod(GeoValidationMethod.infer(coerce, ignoreMalformed));
         }
-        return builder;
+        return Optional.of(builder);
     }
 
     @Override

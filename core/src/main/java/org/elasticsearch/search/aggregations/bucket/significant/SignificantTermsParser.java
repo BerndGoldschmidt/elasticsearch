@@ -19,7 +19,6 @@
 package org.elasticsearch.search.aggregations.bucket.significant;
 
 import org.elasticsearch.common.ParseField;
-import org.elasticsearch.common.ParseFieldMatcher;
 import org.elasticsearch.common.xcontent.ParseFieldRegistry;
 import org.elasticsearch.common.xcontent.XContentParser;
 import org.elasticsearch.common.xcontent.XContentParser.Token;
@@ -33,11 +32,13 @@ import org.elasticsearch.search.aggregations.bucket.terms.AbstractTermsParser;
 import org.elasticsearch.search.aggregations.bucket.terms.TermsAggregator;
 import org.elasticsearch.search.aggregations.bucket.terms.TermsAggregator.BucketCountThresholds;
 import org.elasticsearch.search.aggregations.bucket.terms.support.IncludeExclude;
+import org.elasticsearch.search.aggregations.support.XContentParseContext;
 import org.elasticsearch.search.aggregations.support.ValueType;
 import org.elasticsearch.search.aggregations.support.ValuesSourceType;
 
 import java.io.IOException;
 import java.util.Map;
+import java.util.Optional;
 
 /**
  *
@@ -53,10 +54,11 @@ public class SignificantTermsParser extends AbstractTermsParser {
     }
 
     @Override
-    protected SignificantTermsAggregatorBuilder doCreateFactory(String aggregationName, ValuesSourceType valuesSourceType,
-            ValueType targetValueType, BucketCountThresholds bucketCountThresholds, SubAggCollectionMode collectMode, String executionHint,
-            IncludeExclude incExc, Map<ParseField, Object> otherOptions) {
-        SignificantTermsAggregatorBuilder factory = new SignificantTermsAggregatorBuilder(aggregationName, targetValueType);
+    protected SignificantTermsAggregationBuilder doCreateFactory(String aggregationName, ValuesSourceType valuesSourceType,
+                                                                 ValueType targetValueType, BucketCountThresholds bucketCountThresholds,
+                                                                 SubAggCollectionMode collectMode, String executionHint,
+                                                                 IncludeExclude incExc, Map<ParseField, Object> otherOptions) {
+        SignificantTermsAggregationBuilder factory = new SignificantTermsAggregationBuilder(aggregationName, targetValueType);
         if (bucketCountThresholds != null) {
             factory.bucketCountThresholds(bucketCountThresholds);
         }
@@ -66,11 +68,12 @@ public class SignificantTermsParser extends AbstractTermsParser {
         if (incExc != null) {
             factory.includeExclude(incExc);
         }
-        QueryBuilder<?> backgroundFilter = (QueryBuilder<?>) otherOptions.get(SignificantTermsAggregatorBuilder.BACKGROUND_FILTER);
+        QueryBuilder backgroundFilter = (QueryBuilder) otherOptions.get(SignificantTermsAggregationBuilder.BACKGROUND_FILTER);
         if (backgroundFilter != null) {
             factory.backgroundFilter(backgroundFilter);
         }
-        SignificanceHeuristic significanceHeuristic = (SignificanceHeuristic) otherOptions.get(SignificantTermsAggregatorBuilder.HEURISTIC);
+        SignificanceHeuristic significanceHeuristic =
+            (SignificanceHeuristic) otherOptions.get(SignificantTermsAggregationBuilder.HEURISTIC);
         if (significanceHeuristic != null) {
             factory.significanceHeuristic(significanceHeuristic);
         }
@@ -78,19 +81,22 @@ public class SignificantTermsParser extends AbstractTermsParser {
     }
 
     @Override
-    public boolean parseSpecial(String aggregationName, XContentParser parser, ParseFieldMatcher parseFieldMatcher, Token token,
-            String currentFieldName, Map<ParseField, Object> otherOptions) throws IOException {
+    public boolean parseSpecial(String aggregationName, XContentParseContext context, Token token,
+                                String currentFieldName, Map<ParseField, Object> otherOptions) throws IOException {
         if (token == XContentParser.Token.START_OBJECT) {
             SignificanceHeuristicParser significanceHeuristicParser = significanceHeuristicParserRegistry
-                    .lookupReturningNullIfNotFound(currentFieldName, parseFieldMatcher);
+                    .lookupReturningNullIfNotFound(currentFieldName, context.getParseFieldMatcher());
             if (significanceHeuristicParser != null) {
-                SignificanceHeuristic significanceHeuristic = significanceHeuristicParser.parse(parser, parseFieldMatcher);
-                otherOptions.put(SignificantTermsAggregatorBuilder.HEURISTIC, significanceHeuristic);
+                SignificanceHeuristic significanceHeuristic = significanceHeuristicParser.parse(context);
+                otherOptions.put(SignificantTermsAggregationBuilder.HEURISTIC, significanceHeuristic);
                 return true;
-            } else if (parseFieldMatcher.match(currentFieldName, SignificantTermsAggregatorBuilder.BACKGROUND_FILTER)) {
-                QueryParseContext queryParseContext = new QueryParseContext(queriesRegistry, parser, parseFieldMatcher);
-                QueryBuilder<?> filter = queryParseContext.parseInnerQueryBuilder();
-                otherOptions.put(SignificantTermsAggregatorBuilder.BACKGROUND_FILTER, filter);
+            } else if (context.matchField(currentFieldName, SignificantTermsAggregationBuilder.BACKGROUND_FILTER)) {
+                QueryParseContext queryParseContext = new QueryParseContext(context.getDefaultScriptLanguage(), queriesRegistry,
+                        context.getParser(), context.getParseFieldMatcher());
+                Optional<QueryBuilder> filter = queryParseContext.parseInnerQueryBuilder();
+                if (filter.isPresent()) {
+                    otherOptions.put(SignificantTermsAggregationBuilder.BACKGROUND_FILTER, filter.get());
+                }
                 return true;
             }
         }
@@ -99,6 +105,6 @@ public class SignificantTermsParser extends AbstractTermsParser {
 
     @Override
     protected BucketCountThresholds getDefaultBucketCountThresholds() {
-        return new TermsAggregator.BucketCountThresholds(SignificantTermsAggregatorBuilder.DEFAULT_BUCKET_COUNT_THRESHOLDS);
+        return new TermsAggregator.BucketCountThresholds(SignificantTermsAggregationBuilder.DEFAULT_BUCKET_COUNT_THRESHOLDS);
     }
 }

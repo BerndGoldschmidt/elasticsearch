@@ -228,23 +228,13 @@ public abstract class AbstractXContentParser implements XContentParser {
         return readListOrderedMap(this);
     }
 
-    static interface MapFactory {
+    interface MapFactory {
         Map<String, Object> newMap();
     }
 
-    static final MapFactory SIMPLE_MAP_FACTORY = new MapFactory() {
-        @Override
-        public Map<String, Object> newMap() {
-            return new HashMap<>();
-        }
-    };
+    static final MapFactory SIMPLE_MAP_FACTORY = HashMap::new;
 
-    static final MapFactory ORDERED_MAP_FACTORY = new MapFactory() {
-        @Override
-        public Map<String, Object> newMap() {
-            return new LinkedHashMap<>();
-        }
-    };
+    static final MapFactory ORDERED_MAP_FACTORY = LinkedHashMap::new;
 
     static Map<String, Object> readMap(XContentParser parser) throws IOException {
         return readMap(parser, SIMPLE_MAP_FACTORY);
@@ -310,16 +300,7 @@ public abstract class AbstractXContentParser implements XContentParser {
         } else if (token == XContentParser.Token.VALUE_STRING) {
             return parser.text();
         } else if (token == XContentParser.Token.VALUE_NUMBER) {
-            XContentParser.NumberType numberType = parser.numberType();
-            if (numberType == XContentParser.NumberType.INT) {
-                return parser.intValue();
-            } else if (numberType == XContentParser.NumberType.LONG) {
-                return parser.longValue();
-            } else if (numberType == XContentParser.NumberType.FLOAT) {
-                return parser.floatValue();
-            } else if (numberType == XContentParser.NumberType.DOUBLE) {
-                return parser.doubleValue();
-            }
+            return parser.numberValue();
         } else if (token == XContentParser.Token.VALUE_BOOLEAN) {
             return parser.booleanValue();
         } else if (token == XContentParser.Token.START_OBJECT) {

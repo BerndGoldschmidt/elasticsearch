@@ -21,7 +21,12 @@ package org.elasticsearch.search.suggest;
 import org.apache.lucene.search.spell.DirectSpellChecker;
 import org.apache.lucene.search.spell.StringDistance;
 import org.apache.lucene.search.spell.SuggestMode;
+import org.apache.lucene.search.spell.SuggestWord;
+import org.apache.lucene.search.spell.SuggestWordFrequencyComparator;
+import org.apache.lucene.search.spell.SuggestWordQueue;
 import org.apache.lucene.util.automaton.LevenshteinAutomata;
+
+import java.util.Comparator;
 
 public class DirectSpellcheckerSettings  {
 
@@ -50,6 +55,9 @@ public class DirectSpellcheckerSettings  {
     private int minWordLength = DEFAULT_MIN_WORD_LENGTH;
     private float minDocFreq = DEFAULT_MIN_DOC_FREQ;
     private boolean exactMatch = DEFAULT_EXACT_MATCH;
+
+    private static final Comparator<SuggestWord> LUCENE_FREQUENCY = new SuggestWordFrequencyComparator();
+    private static final Comparator<SuggestWord> SCORE_COMPARATOR = SuggestWordQueue.DEFAULT_COMPARATOR;
 
     public SuggestMode suggestMode() {
         return suggestMode;
@@ -136,6 +144,33 @@ public class DirectSpellcheckerSettings  {
  
     public void exactMatch(boolean exactMatch) {
        this.exactMatch = exactMatch;
+    }
+
+    public DirectSpellChecker createDirectSpellChecker() {
+
+        DirectSpellChecker directSpellChecker = new DirectSpellChecker();
+        directSpellChecker.setAccuracy(accuracy());
+        Comparator<SuggestWord> comparator;
+        switch (sort()) {
+            case SCORE:
+                comparator = SCORE_COMPARATOR;
+                break;
+            case FREQUENCY:
+                comparator = LUCENE_FREQUENCY;
+                break;
+            default:
+                throw new IllegalArgumentException("Illegal suggest sort: " + sort());
+        }
+        directSpellChecker.setComparator(comparator);
+        directSpellChecker.setDistance(stringDistance());
+        directSpellChecker.setMaxEdits(maxEdits());
+        directSpellChecker.setMaxInspections(maxInspections());
+        directSpellChecker.setMaxQueryFrequency(maxTermFreq());
+        directSpellChecker.setMinPrefix(prefixLength());
+        directSpellChecker.setMinQueryLength(minWordLength());
+        directSpellChecker.setThresholdFrequency(minDocFreq());
+        directSpellChecker.setLowerCaseTerms(false);
+        return directSpellChecker;
     }
 
     @Override

@@ -21,7 +21,10 @@ package org.elasticsearch.search.sort;
 
 import org.apache.lucene.search.SortField;
 import org.apache.lucene.util.Accountable;
+import org.elasticsearch.Version;
+import org.elasticsearch.cluster.metadata.IndexMetaData;
 import org.elasticsearch.common.ParseFieldMatcher;
+import org.elasticsearch.cluster.ClusterState;
 import org.elasticsearch.common.io.stream.BytesStreamOutput;
 import org.elasticsearch.common.io.stream.NamedWriteableAwareStreamInput;
 import org.elasticsearch.common.io.stream.NamedWriteableRegistry;
@@ -40,12 +43,16 @@ import org.elasticsearch.index.cache.bitset.BitsetFilterCache;
 import org.elasticsearch.index.fielddata.IndexFieldDataService;
 import org.elasticsearch.index.mapper.ContentPath;
 import org.elasticsearch.index.mapper.MappedFieldType;
+import org.elasticsearch.index.mapper.ObjectMapper;
+import org.elasticsearch.index.mapper.LegacyDoubleFieldMapper.DoubleFieldType;
 import org.elasticsearch.index.mapper.Mapper.BuilderContext;
-import org.elasticsearch.index.mapper.core.LegacyDoubleFieldMapper.DoubleFieldType;
-import org.elasticsearch.index.mapper.object.ObjectMapper;
-import org.elasticsearch.index.mapper.object.ObjectMapper.Nested;
+import org.elasticsearch.index.mapper.ObjectMapper.Nested;
+import org.elasticsearch.index.query.IdsQueryBuilder;
+import org.elasticsearch.index.query.MatchAllQueryBuilder;
+import org.elasticsearch.index.query.QueryBuilder;
 import org.elasticsearch.index.query.QueryParseContext;
 import org.elasticsearch.index.query.QueryShardContext;
+import org.elasticsearch.index.query.TermQueryBuilder;
 import org.elasticsearch.index.shard.ShardId;
 import org.elasticsearch.indices.fielddata.cache.IndicesFieldDataCache;
 import org.elasticsearch.indices.query.IndicesQueriesRegistry;
@@ -57,6 +64,7 @@ import org.elasticsearch.script.ScriptEngineRegistry;
 import org.elasticsearch.script.ScriptService;
 import org.elasticsearch.script.ScriptServiceTests.TestEngineService;
 import org.elasticsearch.script.ScriptSettings;
+import org.elasticsearch.search.DocValueFormat;
 import org.elasticsearch.search.SearchModule;
 import org.elasticsearch.test.ESTestCase;
 import org.elasticsearch.test.IndexSettingsModule;
@@ -69,6 +77,7 @@ import java.nio.file.Path;
 import java.util.Collections;
 import java.util.Map;
 
+import static java.util.Collections.emptyList;
 import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.not;
 
@@ -89,10 +98,9 @@ public abstract class AbstractSortTestCase<T extends SortBuilder<T>> extends EST
                 .build();
         Environment environment = new Environment(baseSettings);
         ScriptContextRegistry scriptContextRegistry = new ScriptContextRegistry(Collections.emptyList());
-        ScriptEngineRegistry scriptEngineRegistry = new ScriptEngineRegistry(Collections.singletonList(new ScriptEngineRegistry
-                .ScriptEngineRegistration(TestEngineService.class, TestEngineService.TYPES)));
+        ScriptEngineRegistry scriptEngineRegistry = new ScriptEngineRegistry(Collections.singletonList(new TestEngineService()));
         ScriptSettings scriptSettings = new ScriptSettings(scriptEngineRegistry, scriptContextRegistry);
-        scriptService = new ScriptService(baseSettings, environment, Collections.singleton(new TestEngineService()),
+        scriptService = new ScriptService(baseSettings, environment,
                 new ResourceWatcherService(baseSettings, null), scriptEngineRegistry, scriptContextRegistry, scriptSettings) {
             @Override
             public CompiledScript compile(Script script, ScriptContext scriptContext, Map<String, String> params) {
@@ -100,8 +108,9 @@ public abstract class AbstractSortTestCase<T extends SortBuilder<T>> extends EST
             }
         };
 
-        namedWriteableRegistry = new NamedWriteableRegistry();
-        indicesQueriesRegistry = new SearchModule(Settings.EMPTY, namedWriteableRegistry).getQueryParserRegistry();
+        SearchModule searchModule = new SearchModule(Settings.EMPTY, false, emptyList());
+        namedWriteableRegistry = new NamedWriteableRegistry(searchModule.getNamedWriteables());
+        indicesQueriesRegistry = searchModule.getQueryParserRegistry();
     }
 
     @AfterClass
@@ -131,7 +140,7 @@ public abstract class AbstractSortTestCase<T extends SortBuilder<T>> extends EST
                 builder.prettyPrint();
             }
             testItem.toXContent(builder, ToXContent.EMPTY_PARAMS);
-            XContentBuilder shuffled = shuffleXContent(builder, Collections.emptySet());
+            XContentBuilder shuffled = shuffleXContent(builder);
             XContentParser itemParser = XContentHelper.createParser(shuffled.bytes());
             itemParser.nextToken();
 
@@ -158,12 +167,12 @@ public abstract class AbstractSortTestCase<T extends SortBuilder<T>> extends EST
         QueryShardContext mockShardContext = createMockShardContext();
         for (int runs = 0; runs < NUMBER_OF_TESTBUILDERS; runs++) {
             T sortBuilder = createTestItem();
-            SortField sortField = sortBuilder.build(mockShardContext);
-            sortFieldAssertions(sortBuilder, sortField);
+            SortFieldAndFormat sortField = sortBuilder.build(mockShardContext);
+            sortFieldAssertions(sortBuilder, sortField.field, sortField.format);
         }
     }
 
-    protected abstract void sortFieldAssertions(T builder, SortField sortField) throws IOException;
+    protected abstract void sortFieldAssertions(T builder, SortField sortField, DocValueFormat format) throws IOException;
 
     /**
      * Test serialization and deserialization of the test sort.
@@ -211,7 +220,8 @@ public abstract class AbstractSortTestCase<T extends SortBuilder<T>> extends EST
 
     protected QueryShardContext createMockShardContext() {
         Index index = new Index(randomAsciiOfLengthBetween(1, 10), "_na_");
-        IndexSettings idxSettings = IndexSettingsModule.newIndexSettings(index, Settings.EMPTY);
+        IndexSettings idxSettings = IndexSettingsModule.newIndexSettings(index,
+            Settings.builder().put(IndexMetaData.SETTING_VERSION_CREATED, Version.CURRENT).build());
         IndicesFieldDataCache cache = new IndicesFieldDataCache(Settings.EMPTY, null);
         IndexFieldDataService ifds = new IndexFieldDataService(IndexSettingsModule.newIndexSettings("test", Settings.EMPTY),
                 cache, null, null);
@@ -226,7 +236,7 @@ public abstract class AbstractSortTestCase<T extends SortBuilder<T>> extends EST
             }
         });
         return new QueryShardContext(idxSettings, bitsetFilterCache, ifds, null, null, scriptService,
-                indicesQueriesRegistry, null, null) {
+                indicesQueriesRegistry, null, null, null) {
             @Override
             public MappedFieldType fieldMapper(String name) {
                 return provideMappedFieldType(name);
@@ -234,8 +244,8 @@ public abstract class AbstractSortTestCase<T extends SortBuilder<T>> extends EST
 
             @Override
             public ObjectMapper getObjectMapper(String name) {
-                BuilderContext context = new BuilderContext(Settings.EMPTY, new ContentPath());
-                return new ObjectMapper.Builder<>(name).nested(Nested.newNested(false, false)).build(context);
+                BuilderContext context = new BuilderContext(this.getIndexSettings().getSettings(), new ContentPath());
+                return (ObjectMapper) new ObjectMapper.Builder<>(name).nested(Nested.newNested(false, false)).build(context);
             }
         };
     }
@@ -251,11 +261,23 @@ public abstract class AbstractSortTestCase<T extends SortBuilder<T>> extends EST
         return doubleFieldType;
     }
 
+    protected static QueryBuilder randomNestedFilter() {
+        int id = randomIntBetween(0, 2);
+        switch(id) {
+            case 0: return (new MatchAllQueryBuilder()).boost(randomFloat());
+            case 1: return (new IdsQueryBuilder()).boost(randomFloat());
+            case 2: return (new TermQueryBuilder(
+                    randomAsciiOfLengthBetween(1, 10),
+                    randomDouble()).boost(randomFloat()));
+            default: throw new IllegalStateException("Only three query builders supported for testing sort");
+        }
+    }
+
     @SuppressWarnings("unchecked")
     private T copyItem(T original) throws IOException {
         try (BytesStreamOutput output = new BytesStreamOutput()) {
             original.writeTo(output);
-            try (StreamInput in = new NamedWriteableAwareStreamInput(StreamInput.wrap(output.bytes()), namedWriteableRegistry)) {
+            try (StreamInput in = new NamedWriteableAwareStreamInput(output.bytes().streamInput(), namedWriteableRegistry)) {
                 return (T) namedWriteableRegistry.getReader(SortBuilder.class, original.getWriteableName()).read(in);
             }
         }

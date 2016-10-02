@@ -19,9 +19,9 @@
 package org.elasticsearch.search.aggregations.metrics.stats;
 
 import org.elasticsearch.common.ParseField;
-import org.elasticsearch.common.ParseFieldMatcher;
 import org.elasticsearch.common.xcontent.XContentParser;
 import org.elasticsearch.search.aggregations.support.AbstractValuesSourceParser.NumericValuesSourceParser;
+import org.elasticsearch.search.aggregations.support.XContentParseContext;
 import org.elasticsearch.search.aggregations.support.ValueType;
 import org.elasticsearch.search.aggregations.support.ValuesSourceType;
 
@@ -38,14 +38,14 @@ public class StatsParser extends NumericValuesSourceParser {
     }
 
     @Override
-    protected boolean token(String aggregationName, String currentFieldName, XContentParser.Token token, XContentParser parser,
-            ParseFieldMatcher parseFieldMatcher, Map<ParseField, Object> otherOptions) throws IOException {
+    protected boolean token(String aggregationName, String currentFieldName, XContentParser.Token token,
+                            XContentParseContext context, Map<ParseField, Object> otherOptions) throws IOException {
         return false;
     }
 
     @Override
-    protected StatsAggregatorBuilder createFactory(String aggregationName, ValuesSourceType valuesSourceType,
-            ValueType targetValueType, Map<ParseField, Object> otherOptions) {
-        return new StatsAggregatorBuilder(aggregationName);
+    protected StatsAggregationBuilder createFactory(String aggregationName, ValuesSourceType valuesSourceType,
+                                                    ValueType targetValueType, Map<ParseField, Object> otherOptions) {
+        return new StatsAggregationBuilder(aggregationName);
     }
 }

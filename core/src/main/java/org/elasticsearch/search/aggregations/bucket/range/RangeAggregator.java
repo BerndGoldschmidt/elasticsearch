@@ -57,7 +57,7 @@ public class RangeAggregator extends BucketsAggregator {
     public static final ParseField RANGES_FIELD = new ParseField("ranges");
     public static final ParseField KEYED_FIELD = new ParseField("keyed");
 
-    public static class Range implements Writeable<Range>, ToXContent {
+    public static class Range implements Writeable, ToXContent {
         public static final ParseField KEY_FIELD = new ParseField("key");
         public static final ParseField FROM_FIELD = new ParseField("from");
         public static final ParseField TO_FIELD = new ParseField("to");
@@ -119,10 +119,10 @@ public class RangeAggregator extends BucketsAggregator {
             Double from = this.from;
             Double to = this.to;
             if (fromAsStr != null) {
-                from = parser.parseDouble(fromAsStr, false, context.nowCallable());
+                from = parser.parseDouble(fromAsStr, false, context::nowInMillis);
             }
             if (toAsStr != null) {
-                to = parser.parseDouble(toAsStr, false, context.nowCallable());
+                to = parser.parseDouble(toAsStr, false, context::nowInMillis);
             }
             return new Range(key, from, fromAsStr, to, toAsStr);
         }
@@ -305,7 +305,7 @@ public class RangeAggregator extends BucketsAggregator {
         };
     }
 
-    private final long subBucketOrdinal(long owningBucketOrdinal, int rangeOrd) {
+    private long subBucketOrdinal(long owningBucketOrdinal, int rangeOrd) {
         return owningBucketOrdinal * ranges.length + rangeOrd;
     }
 
@@ -337,7 +337,7 @@ public class RangeAggregator extends BucketsAggregator {
         return rangeFactory.create(name, buckets, format, keyed, pipelineAggregators(), metaData());
     }
 
-    private static final void sortRanges(final Range[] ranges) {
+    private static void sortRanges(final Range[] ranges) {
         new InPlaceMergeSorter() {
 
             @Override
